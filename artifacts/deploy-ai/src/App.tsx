@@ -1,6 +1,6 @@
 import { type ButtonHTMLAttributes, type ChangeEvent, type ReactNode, useEffect, useRef, useState } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { ArrowLeft, ArrowRight, Check, ChevronRight, CircleAlert, Clock3, Code2, Copy, ExternalLink, FileCode2, FileText, Github, Globe2, Layers3, Lightbulb, LoaderCircle, LockKeyhole, PackageCheck, Rocket, Server, ShieldCheck, Sparkles, Terminal, UploadCloud, WandSparkles, X, Zap, type LucideIcon } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, ChevronRight, CircleAlert, Clock3, Code2, Copy, ExternalLink, FileCode2, FileText, Github, Globe2, Home as HomeIcon, Layers3, Lightbulb, LoaderCircle, LockKeyhole, PackageCheck, Rocket, Server, ShieldCheck, Sparkles, Terminal, UploadCloud, WandSparkles, X, Zap, type LucideIcon } from 'lucide-react';
 import { Link, Route, Switch, useLocation, Router as WouterRouter } from 'wouter';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { Toaster } from '@/components/ui/toaster';
@@ -15,39 +15,59 @@ type SourceKind = 'ZIP upload' | 'GitHub repository';
 type Project = {
   name: string;
   source: SourceKind;
+  fileName: string;
+  fileType: string;
+  fileSize: string;
   language: string;
   framework: string;
   packageManager: string;
   dependencies: number;
   buildCommand: string;
   outputDirectory: string;
+  environmentVariables: string;
   confidence: number;
 };
 
 const SAMPLE_PROJECT: Project = {
   name: 'launchpad-web',
-  source: 'GitHub repository',
-  language: 'TypeScript',
+  source: 'ZIP upload',
+  fileName: 'launchpad-web.zip',
+  fileType: 'ZIP archive',
+  fileSize: '1.8 MB',
+  language: 'JavaScript',
   framework: 'React + Vite',
-  packageManager: 'pnpm',
-  dependencies: 18,
-  buildCommand: 'pnpm build',
+  packageManager: 'npm',
+  dependencies: 24,
+  buildCommand: 'npm run build',
   outputDirectory: 'dist',
+  environmentVariables: 'None detected',
   confidence: 98,
 };
 
 const PROVIDERS: Record<ProviderId, { name: string; mark: string; description: string; cost: string; time: string; color: string }> = {
-  vercel: { name: 'Vercel', mark: 'V', description: 'Edge delivery with zero-config previews.', cost: '$0–20 / month', time: 'about 45 seconds', color: '#171c3a' },
-  railway: { name: 'Railway', mark: 'R', description: 'Simple infrastructure for teams that want more control.', cost: '$5–18 / month', time: 'about 1 minute', color: '#5c49d8' },
+  vercel: { name: 'Vercel', mark: 'V', description: 'Fast static hosting with zero-config previews.', cost: '₹0–₹500 / month', time: 'about 45 seconds', color: '#171c3a' },
+  railway: { name: 'Railway', mark: 'R', description: 'More control for teams with growing infrastructure needs.', cost: '₹500–₹1,500 / month', time: 'about 1 minute', color: '#5c49d8' },
 };
 
 const STAGES = [
   { label: 'Preparing project', detail: 'Checking source files and deployment settings', icon: Layers3 },
-  { label: 'Installing dependencies', detail: 'Resolving 18 packages from pnpm-lock.yaml', icon: PackageCheck },
+  { label: 'Installing dependencies', detail: 'Resolving 24 packages from package-lock.json', icon: PackageCheck },
   { label: 'Running build', detail: 'Creating an optimized production bundle', icon: Terminal },
   { label: 'Uploading files', detail: 'Sending dist/ to the edge network', icon: UploadCloud },
-  { label: 'Health check', detail: 'Verifying your live URL responds correctly', icon: ShieldCheck },
+  { label: 'Running health check', detail: 'Verifying your live URL responds correctly', icon: ShieldCheck },
+  { label: 'Generating live URL', detail: 'Assigning a secure address to your project', icon: Globe2 },
 ];
+
+const ANALYSIS_STEPS = [
+  'Reading project files',
+  'Detecting programming language',
+  'Detecting framework',
+  'Analyzing dependencies',
+  'Finding build command',
+  'Checking environment variables',
+];
+
+type SourceMeta = Pick<Project, 'fileName' | 'fileType' | 'fileSize'>;
 
 function Button({ children, className = '', variant = 'primary', ...props }: { children: ReactNode; className?: string; variant?: 'primary' | 'secondary' | 'quiet' | 'danger' } & ButtonHTMLAttributes<HTMLButtonElement>) {
   const variants = {
@@ -73,7 +93,7 @@ function Logo() {
 
 function Header() {
   const [location] = useLocation();
-  const flowPath = ['/analysis', '/providers', '/approve', '/deploying', '/success'].includes(location);
+  const flowPath = ['/upload', '/analysis', '/providers', '/approve', '/deploying', '/success'].includes(location);
   return (
     <header className="relative z-10 border-b border-[#e7e9f3] bg-[#fafaff]/90 backdrop-blur-xl">
       <div className="mx-auto flex h-[72px] max-w-[1160px] items-center justify-between px-5 sm:px-8">
@@ -113,7 +133,7 @@ function FlowRail({ current }: { current: number }) {
 function PageShell({ children, flowStep, className = '' }: { children: ReactNode; flowStep?: number; className?: string }) {
   return (
     <div className="app-grid min-h-[calc(100dvh-72px)] bg-[#f8f9fe]">
-      <main className={`mx-auto w-full max-w-[1160px] px-5 py-8 sm:px-8 sm:py-12 ${className}`}>
+      <main className={`mx-auto w-full max-w-[1160px] px-5 pb-24 pt-8 sm:px-8 sm:py-12 ${className}`}>
         {typeof flowStep === 'number' && <FlowRail current={flowStep} />}
         {children}
       </main>
@@ -121,7 +141,7 @@ function PageShell({ children, flowStep, className = '' }: { children: ReactNode
   );
 }
 
-function Home({ onChooseSource }: { onChooseSource: (source: SourceKind, fileName?: string) => void }) {
+function Home({ onChooseSource }: { onChooseSource: (source: SourceKind, fileName?: string, meta?: SourceMeta, destination?: string) => void }) {
   const [, setLocation] = useLocation();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [githubOpen, setGithubOpen] = useState(false);
@@ -130,14 +150,23 @@ function Home({ onChooseSource }: { onChooseSource: (source: SourceKind, fileNam
 
   const onFile = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (file) onChooseSource('ZIP upload', file.name.replace(/\.zip$/i, '') || 'launchpad-web');
+    if (file) onChooseSource('ZIP upload', file.name.replace(/\.zip$/i, '') || 'launchpad-web', {
+      fileName: file.name,
+      fileType: 'ZIP archive',
+      fileSize: `${(file.size / (1024 * 1024)).toFixed(1)} MB`,
+    }, '/upload');
   };
   const connectGithub = () => {
     setConnecting(true);
     window.setTimeout(() => {
       setConnecting(false);
       setGithubOpen(false);
-      onChooseSource('GitHub repository', repo.split('/').pop() || 'launchpad-web');
+      const repositoryName = repo.split('/').pop() || 'launchpad-web';
+      onChooseSource('GitHub repository', repositoryName, {
+        fileName: repo,
+        fileType: 'GitHub repository',
+        fileSize: 'Remote source',
+      }, '/upload');
     }, 650);
   };
 
@@ -161,8 +190,12 @@ function Home({ onChooseSource }: { onChooseSource: (source: SourceKind, fileNam
             <Button variant="secondary" onClick={() => setGithubOpen(true)} data-testid="button-connect-github"><Github size={17} /> Connect GitHub</Button>
             <input ref={fileInputRef} onChange={onFile} type="file" accept=".zip,application/zip" className="hidden" data-testid="input-upload-zip" />
           </div>
-          <button onClick={() => onChooseSource('GitHub repository', 'launchpad-web')} className="mt-5 inline-flex items-center gap-2 text-xs font-bold text-[#5965df] transition-colors hover:text-[#3f48b8]" data-testid="button-try-sample">
-            <WandSparkles size={14} /> Try the sample project <ChevronRight size={14} />
+           <button onClick={() => onChooseSource('ZIP upload', 'launchpad-web', {
+             fileName: SAMPLE_PROJECT.fileName,
+             fileType: SAMPLE_PROJECT.fileType,
+             fileSize: SAMPLE_PROJECT.fileSize,
+           }, '/analysis')} className="mt-5 inline-flex items-center gap-2 text-xs font-bold text-[#5965df] transition-colors hover:text-[#3f48b8]" data-testid="button-try-sample">
+             <WandSparkles size={14} /> Try Demo with sample project <ChevronRight size={14} />
           </button>
           <div className="mt-12 flex items-center gap-6 border-t border-[#e3e6f2] pt-5 text-[11px] font-semibold text-[#8b91ac]">
             <span className="flex items-center gap-1.5"><ShieldCheck size={14} className="text-[#45aaa0]" /> No credentials stored</span>
@@ -213,7 +246,51 @@ function Home({ onChooseSource }: { onChooseSource: (source: SourceKind, fileNam
   );
 }
 
+function UploadProject({ project, setLocation }: { project: Project; setLocation: (path: string) => void }) {
+  return <PageShell flowStep={0}>
+    <div className="mx-auto max-w-[720px]">
+      <div className="fade-up">
+        <p className="font-mono text-[11px] font-medium uppercase tracking-[.16em] text-[#5965df]">00 / Project source</p>
+        <h1 className="mt-3 text-3xl font-extrabold tracking-[-.06em] text-[#292e59] sm:text-4xl">Your project is ready to inspect.</h1>
+        <p className="mt-2 text-sm leading-6 text-[#757d9e]">Confirm the source details before DeployAI starts its guided analysis.</p>
+      </div>
+      <div className="mt-8 overflow-hidden rounded-2xl border border-[#e1e4f1] bg-white shadow-[var(--shadow-card)] fade-up fade-up-delay-1">
+        <div className="flex items-center gap-4 border-b border-[#eceef6] p-6 sm:p-8">
+          <span className="grid size-12 shrink-0 place-items-center rounded-xl bg-[#f0f1ff] text-[#5965df]">
+            {project.source === 'ZIP upload' ? <FileCode2 size={22} /> : <Github size={22} />}
+          </span>
+          <div className="min-w-0">
+            <p className="text-[11px] font-bold uppercase tracking-[.12em] text-[#9ca2b8]">{project.source}</p>
+            <h2 className="mt-1 truncate text-xl font-extrabold tracking-[-.04em] text-[#303762]">{project.name}</h2>
+          </div>
+        </div>
+        <div className="grid gap-4 p-6 sm:grid-cols-3 sm:p-8">
+          <UploadDetail label="File name" value={project.fileName} mono />
+          <UploadDetail label="File type" value={project.fileType} />
+          <UploadDetail label="File size" value={project.fileSize} />
+        </div>
+        <div className="flex flex-col-reverse gap-3 border-t border-[#eceef6] bg-[#fcfcff] p-5 sm:flex-row sm:items-center sm:justify-between sm:px-8">
+          <Button variant="quiet" onClick={() => setLocation('/')} data-testid="button-back-home"><ArrowLeft size={15} /> Back</Button>
+          <Button onClick={() => setLocation('/analysis')} data-testid="button-continue-upload">Continue to AI analysis <ArrowRight size={16} /></Button>
+        </div>
+      </div>
+      <p className="mt-5 flex justify-center gap-1.5 text-center text-[11px] text-[#979db6]"><LockKeyhole size={13} /> Sample data only — no files leave this prototype.</p>
+    </div>
+  </PageShell>;
+}
+
+function UploadDetail({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
+  return <div><p className="text-[10px] font-bold uppercase tracking-[.1em] text-[#a1a6bd]">{label}</p><p className={`mt-1.5 truncate text-sm font-bold text-[#4d557e] ${mono ? 'font-mono text-xs' : ''}`}>{value}</p></div>;
+}
+
 function Analysis({ project, setLocation }: { project: Project; setLocation: (path: string) => void }) {
+  const [analysisProgress, setAnalysisProgress] = useState(ANALYSIS_STEPS.length);
+  const [errorRecoveryOpen, setErrorRecoveryOpen] = useState(false);
+  useEffect(() => {
+    setAnalysisProgress(0);
+    const timer = window.setInterval(() => setAnalysisProgress((value) => value < ANALYSIS_STEPS.length ? value + 1 : value), 220);
+    return () => window.clearInterval(timer);
+  }, [project.name]);
   const rows = [
     { label: 'Language', value: project.language, icon: Code2 },
     { label: 'Framework', value: project.framework, icon: Layers3 },
@@ -221,16 +298,23 @@ function Analysis({ project, setLocation }: { project: Project; setLocation: (pa
     { label: 'Dependencies', value: `${project.dependencies} detected`, icon: FileCode2 },
     { label: 'Build command', value: project.buildCommand, icon: Terminal, mono: true },
     { label: 'Output directory', value: `${project.outputDirectory}/`, icon: FolderIcon, mono: true },
+    { label: 'Environment variables', value: project.environmentVariables, icon: ShieldCheck },
   ];
   return <PageShell flowStep={1}>
     <div className="mx-auto max-w-[850px]">
-      <div className="fade-up"><p className="font-mono text-[11px] font-medium uppercase tracking-[.16em] text-[#5965df]">01 / Project analysis</p><div className="mt-3 flex flex-col justify-between gap-4 sm:flex-row sm:items-end"><div><h1 className="text-3xl font-extrabold tracking-[-.06em] text-[#292e59] sm:text-4xl">Here’s what we found.</h1><p className="mt-2 text-sm text-[#757d9e]">DeployAI mapped the safest path for <span className="font-semibold text-[#4e567e]">{project.name}</span>.</p></div><span className="inline-flex w-fit items-center gap-1.5 rounded-full bg-[#e8f8f5] px-3 py-1.5 text-xs font-bold text-[#3d9e95]"><Check size={14} /> Scan complete</span></div></div>
-      <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{rows.map(({ label, value, icon: Icon, mono }) => <div key={label} className="fade-up fade-up-delay-1 rounded-2xl border border-[#e1e4f1] bg-white p-5 shadow-[var(--shadow-card)]"><div className="flex items-center justify-between"><span className="grid size-8 place-items-center rounded-lg bg-[#f0f1ff] text-[#5965df]"><Icon size={16} /></span><span className="text-[10px] font-bold uppercase tracking-[.12em] text-[#b0b4c8]">detected</span></div><p className="mt-5 text-xs font-semibold text-[#8a91ad]">{label}</p><p className={`mt-1 text-[15px] font-bold text-[#39416c] ${mono ? 'font-mono text-[13px]' : ''}`} data-testid={`text-analysis-${label.toLowerCase().replaceAll(' ', '-')}`}>{value}</p></div>)}</div>
+      <div className="fade-up"><p className="font-mono text-[11px] font-medium uppercase tracking-[.16em] text-[#5965df]">01 / Project analysis</p><div className="mt-3 flex flex-col justify-between gap-4 sm:flex-row sm:items-end"><div><h1 className="text-3xl font-extrabold tracking-[-.06em] text-[#292e59] sm:text-4xl">Here’s what we found.</h1><p className="mt-2 text-sm text-[#757d9e]">DeployAI mapped the safest path for <span className="font-semibold text-[#4e567e]">{project.name}</span>.</p></div><span className={`inline-flex w-fit items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold ${analysisProgress === ANALYSIS_STEPS.length ? 'bg-[#e8f8f5] text-[#3d9e95]' : 'bg-[#f0f1ff] text-[#5965df]'}`}>{analysisProgress === ANALYSIS_STEPS.length ? <Check size={14} /> : <LoaderCircle size={14} className="animate-spin" />} {analysisProgress === ANALYSIS_STEPS.length ? 'Scan complete' : 'Scanning project'}</span></div></div>
+       <div className="mt-8 rounded-2xl border border-[#e1e4f1] bg-white p-5 shadow-[var(--shadow-card)] fade-up fade-up-delay-1">
+         <div className="flex items-center justify-between"><div><p className="text-xs font-bold text-[#414a76]">AI analysis</p><p className="mt-1 text-xs text-[#8a91ad]">{analysisProgress === ANALYSIS_STEPS.length ? 'Analysis complete' : 'Working through your project...'}</p></div><span className="font-mono text-xs font-medium text-[#5965df]">{Math.round((analysisProgress / ANALYSIS_STEPS.length) * 100)}%</span></div>
+         <div className="mt-4 h-2 overflow-hidden rounded-full bg-[#e8eaf4]"><div className="h-full rounded-full bg-[#5965df] transition-all duration-300" style={{ width: `${(analysisProgress / ANALYSIS_STEPS.length) * 100}%` }} /></div>
+         <div className="mt-5 grid gap-2 sm:grid-cols-2">{ANALYSIS_STEPS.map((step, index) => <div key={step} className={`flex items-center gap-2 text-xs ${index < analysisProgress ? 'text-[#3d9e95]' : index === analysisProgress ? 'text-[#5965df]' : 'text-[#a2a8bd]'}`}>{index < analysisProgress ? <Check size={14} strokeWidth={3} /> : index === analysisProgress ? <LoaderCircle size={14} className="animate-spin" /> : <span className="size-1.5 rounded-full bg-current" />}<span className="font-semibold">{step}</span></div>)}</div>
+       </div>
+       <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{rows.map(({ label, value, icon: Icon, mono }) => <div key={label} className="fade-up fade-up-delay-1 rounded-2xl border border-[#e1e4f1] bg-white p-5 shadow-[var(--shadow-card)]"><div className="flex items-center justify-between"><span className="grid size-8 place-items-center rounded-lg bg-[#f0f1ff] text-[#5965df]"><Icon size={16} /></span><span className="text-[10px] font-bold uppercase tracking-[.12em] text-[#b0b4c8]">detected</span></div><p className="mt-5 text-xs font-semibold text-[#8a91ad]">{label}</p><p className={`mt-1 text-[15px] font-bold text-[#39416c] ${mono ? 'font-mono text-[13px]' : ''}`} data-testid={`text-analysis-${label.toLowerCase().replaceAll(' ', '-')}`}>{value}</p></div>)}</div>
       <div className="mt-4 grid gap-4 sm:grid-cols-[1fr_1.25fr]">
         <div className="rounded-2xl border border-[#cfd5ff] bg-[#f4f5ff] p-5"><div className="flex items-center gap-2 text-xs font-bold text-[#4e5790]"><Sparkles size={15} /> AI confidence</div><div className="mt-4 flex items-end justify-between"><span className="text-4xl font-extrabold tracking-[-.07em] text-[#5965df]" data-testid="text-ai-confidence">{project.confidence}%</span><span className="mb-1 text-[11px] font-semibold text-[#7d85ac]">high confidence</span></div><div className="mt-3 h-2 overflow-hidden rounded-full bg-[#dfe3ff]"><div className="h-full w-[98%] rounded-full bg-[#5965df]" /></div></div>
         <div className="rounded-2xl border border-[#e1e4f1] bg-white p-5 shadow-[var(--shadow-card)]"><div className="flex items-start gap-3"><span className="grid size-8 shrink-0 place-items-center rounded-lg bg-[#fff4df] text-[#d58b2d]"><Lightbulb size={16} /></span><div><p className="text-xs font-bold text-[#414a76]">Why this matters</p><p className="mt-1 text-sm leading-6 text-[#757d9e]">Your app is a static Vite build. It can ship without a server, database, or extra configuration.</p></div></div></div>
       </div>
-      <div className="mt-8 flex flex-col-reverse justify-between gap-3 sm:flex-row sm:items-center"><Button variant="quiet" onClick={() => setLocation('/')} data-testid="button-back-source"><ArrowLeft size={15} /> Choose another source</Button><Button onClick={() => setLocation('/providers')} data-testid="button-continue-providers">Compare deployment options <ArrowRight size={16} /></Button></div>
+       <div className="mt-8 flex flex-col-reverse justify-between gap-3 sm:flex-row sm:items-center"><Button variant="quiet" onClick={() => setLocation('/upload')} data-testid="button-back-source"><ArrowLeft size={15} /> Review source</Button><div className="flex flex-col gap-3 sm:flex-row sm:items-center"><Button variant="quiet" onClick={() => setErrorRecoveryOpen((value) => !value)} data-testid="button-error-recovery"><CircleAlert size={15} /> View example error recovery</Button><Button onClick={() => setLocation('/providers')} data-testid="button-continue-providers">Compare deployment options <ArrowRight size={16} /></Button></div></div>
+       {errorRecoveryOpen && <div className="mt-4 flex gap-3 rounded-2xl border border-[#f3dfb9] bg-[#fffaf0] p-4 text-sm text-[#80652e] fade-up" data-testid="panel-error-recovery"><CircleAlert size={17} className="mt-0.5 shrink-0 text-[#d58b2d]" /><p><span className="font-bold">Example recovery:</span> The build command was missing. DeployAI recommends <span className="font-mono font-bold">npm run build</span>.</p></div>}
     </div>
   </PageShell>;
 }
@@ -244,7 +328,7 @@ function Providers({ provider, setProvider, setLocation }: { provider: ProviderI
     <div className="mx-auto max-w-[960px]">
       <div className="fade-up"><p className="font-mono text-[11px] font-medium uppercase tracking-[.16em] text-[#5965df]">02 / Deployment provider</p><h1 className="mt-3 text-3xl font-extrabold tracking-[-.06em] text-[#292e59] sm:text-4xl">Pick your launch lane.</h1><p className="mt-2 max-w-xl text-sm leading-6 text-[#757d9e]">Both options fit your project. We’ve highlighted the trade-offs so you can make the call with confidence.</p></div>
       <div className="mt-8 grid gap-5 lg:grid-cols-2">{(Object.keys(PROVIDERS) as ProviderId[]).map((id) => { const item = PROVIDERS[id]; const selected = provider === id; return <button key={id} onClick={() => setProvider(id)} className={`relative text-left rounded-2xl border p-6 transition-all duration-200 ${selected ? 'border-[#5965df] bg-[#f7f7ff] shadow-[0_12px_35px_rgba(89,101,223,.12)]' : 'border-[#e1e4f1] bg-white hover:-translate-y-0.5 hover:border-[#b9c0ed] hover:shadow-[var(--shadow-card)]'}`} data-testid={`card-provider-${id}`}><div className="flex items-start justify-between"><div className="flex items-center gap-3"><span className="grid size-11 place-items-center rounded-xl text-lg font-extrabold text-white" style={{ backgroundColor: item.color }}>{item.mark}</span><div><h2 className="font-extrabold tracking-[-.03em] text-[#303762]">{item.name}</h2><p className="mt-0.5 text-xs text-[#8990ad]">{item.description}</p></div></div><span className={`grid size-6 place-items-center rounded-full border ${selected ? 'border-[#5965df] bg-[#5965df] text-white' : 'border-[#d6d9e8] text-transparent'}`}><Check size={13} strokeWidth={3} /></span></div><div className="mt-7 grid grid-cols-2 divide-x divide-[#e6e8f2] rounded-xl bg-white p-4 shadow-sm"><div><p className="text-[10px] font-bold uppercase tracking-[.1em] text-[#a0a6be]">Estimated cost</p><p className="mt-1.5 text-sm font-extrabold text-[#414a76]">{item.cost}</p></div><div className="pl-4"><p className="text-[10px] font-bold uppercase tracking-[.1em] text-[#a0a6be]">First deploy</p><p className="mt-1.5 text-sm font-extrabold text-[#414a76]">{item.time}</p></div></div>{id === 'vercel' && <span className="absolute -top-3 left-5 rounded-full bg-[#5965df] px-2.5 py-1 text-[10px] font-bold uppercase tracking-[.1em] text-white">AI recommendation</span>}</button> })}</div>
-      <div className="mt-5 flex gap-3 rounded-2xl border border-[#d6e3f0] bg-[#f1f8fc] p-5"><div className="grid size-9 shrink-0 place-items-center rounded-lg bg-white text-[#4386a6] shadow-sm"><WandSparkles size={17} /></div><div><p className="text-xs font-bold text-[#3f5974]">DeployAI recommends Vercel for this project</p><p className="mt-1 text-sm leading-6 text-[#668099]">The static output maps directly to Vercel’s edge network, so you get the shortest path from build to a fast global URL.</p></div></div>
+       <div className="mt-5 flex gap-3 rounded-2xl border border-[#d6e3f0] bg-[#f1f8fc] p-5"><div className="grid size-9 shrink-0 place-items-center rounded-lg bg-white text-[#4386a6] shadow-sm"><WandSparkles size={17} /></div><div><p className="text-xs font-bold text-[#3f5974]">DeployAI recommends Vercel for this project</p><p className="mt-1 text-sm leading-6 text-[#668099]">This project produces static build files, so a static hosting provider is sufficient and more cost-effective.</p></div></div>
       <div className="mt-8 flex flex-col-reverse justify-between gap-3 sm:flex-row sm:items-center"><Button variant="quiet" onClick={() => setLocation('/analysis')} data-testid="button-back-analysis"><ArrowLeft size={15} /> Back to analysis</Button><Button onClick={() => setLocation('/approve')} data-testid="button-continue-approve">Review launch details <ArrowRight size={16} /></Button></div>
     </div>
   </PageShell>;
@@ -259,7 +343,7 @@ function Approve({ project, provider, setProject, setLocation }: { project: Proj
       <div className="mt-8 overflow-hidden rounded-2xl border border-[#e1e4f1] bg-white shadow-[var(--shadow-card)]">
         <div className="grid gap-6 p-6 sm:grid-cols-[1.05fr_.95fr] sm:p-8">
           <div><label className="text-xs font-bold text-[#4c557e]">Project name<input value={name} onChange={(event) => setName(event.target.value)} className="mt-2 h-12 w-full rounded-xl border border-[#dfe2f1] bg-[#fbfbff] px-3.5 text-sm font-semibold text-[#39416c] outline-none transition focus:border-[#5965df] focus:ring-4 focus:ring-[#5965df]/10" data-testid="input-project-name" /></label><div className="mt-7 space-y-5"><ReviewRow icon={Code2} label="Detected technology" value={`${project.framework} · ${project.language}`} /><ReviewRow icon={Globe2} label="Deployment provider" value={choice.name} mark={choice.mark} /><ReviewRow icon={Clock3} label="Estimated first deploy" value={choice.time} /></div></div>
-          <div className="rounded-2xl bg-[#f5f6ff] p-5"><p className="text-xs font-bold uppercase tracking-[.12em] text-[#858cac]">Estimated monthly cost</p><p className="mt-3 text-4xl font-extrabold tracking-[-.07em] text-[#5965df]" data-testid="text-estimated-cost">{choice.cost.split(' ')[0]}<span className="text-lg text-[#838ab0]"> / month</span></p><div className="my-5 h-px bg-[#dfe2f5]" /><p className="text-xs font-bold text-[#4d567f]">What happens next</p><ul className="mt-3 space-y-3 text-xs leading-5 text-[#737b9c]"><li className="flex gap-2"><Check size={14} className="mt-0.5 shrink-0 text-[#45aaa0]" /> Install dependencies in an isolated build</li><li className="flex gap-2"><Check size={14} className="mt-0.5 shrink-0 text-[#45aaa0]" /> Build and publish your static files</li><li className="flex gap-2"><Check size={14} className="mt-0.5 shrink-0 text-[#45aaa0]" /> Run a health check on the live URL</li></ul></div>
+           <div className="rounded-2xl bg-[#f5f6ff] p-5"><p className="text-xs font-bold uppercase tracking-[.12em] text-[#858cac]">Estimated monthly cost</p><p className="mt-3 text-3xl font-extrabold tracking-[-.07em] text-[#5965df]" data-testid="text-estimated-cost">{choice.cost}</p><p className="mt-2 text-[11px] leading-5 text-[#7f87a8]">This is an estimate. Your provider may charge based on usage.</p><div className="my-5 h-px bg-[#dfe2f5]" /><p className="text-xs font-bold text-[#4d567f]">What happens next</p><ul className="mt-3 space-y-3 text-xs leading-5 text-[#737b9c]"><li className="flex gap-2"><Check size={14} className="mt-0.5 shrink-0 text-[#45aaa0]" /> Install dependencies in an isolated build</li><li className="flex gap-2"><Check size={14} className="mt-0.5 shrink-0 text-[#45aaa0]" /> Build and publish your static files</li><li className="flex gap-2"><Check size={14} className="mt-0.5 shrink-0 text-[#45aaa0]" /> Run a health check on the live URL</li></ul></div>
         </div>
         <div className="flex flex-col-reverse gap-3 border-t border-[#eceef6] bg-[#fcfcff] p-5 sm:flex-row sm:items-center sm:justify-between sm:px-8"><Button variant="quiet" onClick={() => setLocation('/providers')} data-testid="button-back-providers"><ArrowLeft size={15} /> Change provider</Button><Button onClick={() => { setProject({ ...project, name: name.trim() || 'launchpad-web' }); setLocation('/deploying'); }} data-testid="button-approve-deploy"><Rocket size={16} /> Approve & deploy <ArrowRight size={16} /></Button></div>
       </div>
@@ -308,10 +392,32 @@ function Success({ project, provider }: { project: Project; provider: ProviderId
   return <PageShell flowStep={3}>
     <div className="mx-auto max-w-[760px] text-center">
       <div className="fade-up"><div className="relative mx-auto mb-6 grid size-20 place-items-center rounded-[1.6rem] bg-[#e5f8f5] text-[#3d9e95] shadow-[0_0_0_10px_rgba(229,248,245,.7)]"><Check size={39} strokeWidth={2.2} /><span className="absolute -right-1 -top-1 size-3 rounded-full bg-[#f2bd68]" /></div><p className="font-mono text-[11px] font-medium uppercase tracking-[.16em] text-[#3d9e95]">Deployment complete</p><h1 className="mt-3 text-4xl font-extrabold tracking-[-.07em] text-[#292e59] sm:text-5xl">You’re live.</h1><p className="mx-auto mt-3 max-w-md text-sm leading-6 text-[#757d9e]">The first version of <span className="font-bold text-[#4b537d]">{project.name}</span> is now available to the world.</p></div>
-      <div className="mt-9 rounded-2xl border border-[#d9e9e6] bg-white p-5 text-left shadow-[var(--shadow-card)] sm:p-7"><div className="flex items-center justify-between border-b border-[#edf0f4] pb-5"><div className="flex items-center gap-3"><span className="grid size-10 place-items-center rounded-xl bg-[#e7f8f6] text-[#3d9e95]"><Globe2 size={18} /></span><div><p className="text-[11px] font-semibold uppercase tracking-[.1em] text-[#9aa1b7]">Project status</p><p className="mt-0.5 text-sm font-extrabold text-[#3d9e95]" data-testid="status-project-live">Live and healthy</p></div></div><span className="rounded-full bg-[#e8f8f5] px-2.5 py-1 text-[10px] font-bold text-[#3d9e95]">HTTP 200</span></div><div className="mt-5"><p className="text-[11px] font-bold uppercase tracking-[.1em] text-[#9aa1b7]">Live URL</p><div className="mt-2 flex flex-col gap-3 sm:flex-row"><div className="flex min-h-12 flex-1 items-center rounded-xl border border-[#dfe2f1] bg-[#fbfbff] px-3.5 font-mono text-sm text-[#5965df]" data-testid="text-live-url">https://{url}</div><Button variant="secondary" onClick={copyUrl} className="shrink-0" data-testid="button-copy-url">{copied ? <Check size={16} className="text-[#3d9e95]" /> : <Copy size={16} />} {copied ? 'Copied' : 'Copy URL'}</Button></div></div><div className="mt-6 flex flex-col gap-3 sm:flex-row"><Button onClick={() => setOpened(true)} className="flex-1" data-testid="button-open-live"><ExternalLink size={16} /> {opened ? 'Opening live project' : 'Open live project'}</Button><Button variant="secondary" onClick={() => setLogsOpen(!logsOpen)} className="flex-1" data-testid="button-view-logs"><FileText size={16} /> {logsOpen ? 'Hide deployment logs' : 'View deployment logs'}</Button></div>{logsOpen && <div className="mt-5 overflow-hidden rounded-xl bg-[#20254a] p-4 font-mono text-[11px] leading-6 text-[#c4caf1]" data-testid="panel-deployment-logs"><p><span className="text-[#72d2c7]">09:41:02</span> build completed in 18.4s</p><p><span className="text-[#72d2c7]">09:41:03</span> uploaded 24 files to edge</p><p><span className="text-[#72d2c7]">09:41:04</span> health check returned HTTP 200</p><p><span className="text-[#f4c477]">09:41:04</span> deployment marked live</p></div>}</div>
-      <div className="mt-6 flex flex-col items-center justify-center gap-3 text-xs text-[#9299b2] sm:flex-row sm:gap-6"><span className="flex items-center gap-1.5"><ShieldCheck size={14} className="text-[#3d9e95]" /> SSL active</span><span className="flex items-center gap-1.5"><Server size={14} className="text-[#5965df]" /> Hosted on {PROVIDERS[provider].name}</span><Link href="/" className="font-bold text-[#5965df] hover:text-[#3e49b8]" data-testid="link-deploy-another">Deploy another project <ArrowRight size={13} className="inline" /></Link></div>
+       <div className="mt-9 rounded-2xl border border-[#d9e9e6] bg-white p-5 text-left shadow-[var(--shadow-card)] sm:p-7"><div className="flex items-center justify-between border-b border-[#edf0f4] pb-5"><div className="flex items-center gap-3"><span className="grid size-10 place-items-center rounded-xl bg-[#e7f8f6] text-[#3d9e95]"><Globe2 size={18} /></span><div><p className="text-[11px] font-semibold uppercase tracking-[.1em] text-[#9aa1b7]">Project status</p><p className="mt-0.5 text-sm font-extrabold text-[#3d9e95]" data-testid="status-project-live">Healthy</p></div></div><span className="rounded-full bg-[#e8f8f5] px-2.5 py-1 text-[10px] font-bold text-[#3d9e95]">HTTP 200</span></div><div className="mt-5 grid gap-4 sm:grid-cols-[1fr_auto]"><div><p className="text-[11px] font-bold uppercase tracking-[.1em] text-[#9aa1b7]">Live URL</p><div className="mt-2 flex flex-col gap-3 sm:flex-row"><div className="flex min-h-12 flex-1 items-center rounded-xl border border-[#dfe2f1] bg-[#fbfbff] px-3.5 font-mono text-sm text-[#5965df]" data-testid="text-live-url">https://{url}</div><Button variant="secondary" onClick={copyUrl} className="shrink-0" data-testid="button-copy-url">{copied ? <Check size={16} className="text-[#3d9e95]" /> : <Copy size={16} />} {copied ? 'Copied' : 'Copy URL'}</Button></div></div><div className="rounded-xl bg-[#f5f6ff] px-4 py-3 sm:min-w-32"><p className="text-[10px] font-bold uppercase tracking-[.1em] text-[#9aa1b7]">Build time</p><p className="mt-1 text-lg font-extrabold text-[#5965df]">42 seconds</p></div></div><div className="mt-6 flex flex-col gap-3 sm:flex-row"><Button onClick={() => setOpened(true)} className="flex-1" data-testid="button-open-live"><ExternalLink size={16} /> {opened ? 'Opening live project' : 'Open live project'}</Button><Button variant="secondary" onClick={() => setLogsOpen(!logsOpen)} className="flex-1" data-testid="button-view-logs"><FileText size={16} /> {logsOpen ? 'Hide deployment logs' : 'View logs'}</Button></div>{logsOpen && <div className="mt-5 overflow-hidden rounded-xl bg-[#20254a] p-4 font-mono text-[11px] leading-6 text-[#c4caf1]" data-testid="panel-deployment-logs"><p><span className="text-[#72d2c7]">09:41:02</span> build completed in 42s</p><p><span className="text-[#72d2c7]">09:41:03</span> uploaded 24 files to edge</p><p><span className="text-[#72d2c7]">09:41:04</span> health check returned HTTP 200</p><p><span className="text-[#f4c477]">09:41:04</span> deployment marked live</p></div>}</div>
+       <div className="mt-6 flex flex-col items-center justify-center gap-3 text-xs text-[#9299b2] sm:flex-row sm:gap-6"><span className="flex items-center gap-1.5"><ShieldCheck size={14} className="text-[#3d9e95]" /> SSL active</span><span className="flex items-center gap-1.5"><Server size={14} className="text-[#5965df]" /> Hosted on {PROVIDERS[provider].name}</span><Link href="/" className="font-bold text-[#5965df] hover:text-[#3e49b8]" data-testid="link-deploy-another">Deploy another project <ArrowRight size={13} className="inline" /></Link></div>
+       <Link href="/" className="mx-auto mt-6 flex min-h-11 w-full max-w-xs items-center justify-center gap-2 rounded-xl border border-[#d9ddf1] bg-white px-4 text-sm font-semibold text-[#252b59] transition hover:border-[#aeb6ea] hover:bg-[#f8f8ff]" data-testid="button-deploy-another"><Rocket size={16} /> Deploy another project</Link>
     </div>
   </PageShell>;
+}
+
+function MobileBottomNav() {
+  const [location] = useLocation();
+  const items = [
+    { label: 'Home', href: '/', icon: HomeIcon },
+    { label: 'Analyze', href: '/analysis', icon: Sparkles },
+    { label: 'Launch', href: '/providers', icon: Rocket },
+    { label: 'Status', href: '/success', icon: Globe2 },
+  ];
+  return <nav className="fixed inset-x-0 bottom-0 z-20 border-t border-[#e0e3f0] bg-white/95 px-3 pb-[max(10px,env(safe-area-inset-bottom))] pt-2 shadow-[0_-10px_28px_rgba(65,70,150,.08)] backdrop-blur-xl sm:hidden" aria-label="Mobile navigation">
+    <div className="mx-auto grid max-w-md grid-cols-4 gap-1">
+      {items.map(({ label, href, icon: Icon }) => {
+        const active = href === '/' ? location === '/' : location.startsWith(href);
+        return <Link key={href} href={href} className={`flex min-h-12 flex-col items-center justify-center gap-1 rounded-xl text-[10px] font-bold transition-colors ${active ? 'bg-[#f0f1ff] text-[#5965df]' : 'text-[#9aa1b7] hover:bg-[#f8f8ff] hover:text-[#5965df]'}`} data-testid={`mobile-nav-${label.toLowerCase()}`}>
+          <Icon size={17} />
+          <span>{label}</span>
+        </Link>;
+      })}
+    </div>
+  </nav>;
 }
 
 function AppRouter() {
@@ -319,15 +425,21 @@ function AppRouter() {
   const [project, setProject] = useState<Project>(SAMPLE_PROJECT);
   const [provider, setProvider] = useState<ProviderId>('vercel');
 
-  const chooseSource = (source: SourceKind, fileName = 'launchpad-web') => {
-    setProject({ ...SAMPLE_PROJECT, source, name: fileName.replace(/[^a-zA-Z0-9-_]/g, '-').toLowerCase() });
-    setLocation('/analysis');
+  const chooseSource = (source: SourceKind, fileName = 'launchpad-web', meta?: SourceMeta, destination = '/upload') => {
+    setProject({
+      ...SAMPLE_PROJECT,
+      source,
+      name: fileName.replace(/[^a-zA-Z0-9-_]/g, '-').toLowerCase(),
+      ...meta,
+    });
+    setLocation(destination);
   };
 
   return <RoutedErrorBoundary>
     <Header />
     <Switch>
       <Route path="/" component={() => <Home onChooseSource={chooseSource} />} />
+      <Route path="/upload" component={() => <UploadProject project={project} setLocation={setLocation} />} />
       <Route path="/analysis" component={() => <Analysis project={project} setLocation={setLocation} />} />
       <Route path="/providers" component={() => <Providers provider={provider} setProvider={setProvider} setLocation={setLocation} />} />
       <Route path="/approve" component={() => <Approve project={project} provider={provider} setProject={setProject} setLocation={setLocation} />} />
@@ -335,6 +447,7 @@ function AppRouter() {
       <Route path="/success" component={() => <Success project={project} provider={provider} />} />
       <Route component={NotFound} />
     </Switch>
+    <MobileBottomNav />
   </RoutedErrorBoundary>;
 }
 
