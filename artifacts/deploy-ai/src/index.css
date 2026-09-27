@@ -1,0 +1,118 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-card-border: hsl(var(--card-border));
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-popover-border: hsl(var(--popover-border));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --font-sans: var(--app-font-sans);
+  --font-mono: var(--app-font-mono);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+:root {
+  --background: 225 45% 97%;
+  --foreground: 228 34% 17%;
+  --border: 225 27% 89%;
+  --input: 225 27% 89%;
+  --ring: 235 79% 61%;
+  --card: 0 0% 100%;
+  --card-foreground: 228 34% 17%;
+  --card-border: 225 29% 91%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 228 34% 17%;
+  --popover-border: 225 29% 91%;
+  --primary: 235 79% 61%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 225 38% 94%;
+  --secondary-foreground: 231 37% 27%;
+  --muted: 225 31% 94%;
+  --muted-foreground: 226 19% 48%;
+  --accent: 194 93% 91%;
+  --accent-foreground: 222 50% 26%;
+  --destructive: 0 72% 55%;
+  --destructive-foreground: 0 0% 100%;
+  --app-font-sans: 'Plus Jakarta Sans', ui-sans-serif, sans-serif;
+  --app-font-mono: 'DM Mono', ui-monospace, monospace;
+  --radius: 0.75rem;
+  --shadow-card: 0 16px 50px rgba(65, 70, 150, 0.08);
+  --shadow-float: 0 22px 70px rgba(65, 70, 150, 0.14);
+}
+
+.dark {
+  --background: 231 33% 10%;
+  --foreground: 225 24% 94%;
+  --border: 231 22% 24%;
+  --input: 231 22% 24%;
+  --ring: 235 79% 70%;
+  --card: 231 29% 14%;
+  --card-foreground: 225 24% 94%;
+  --card-border: 231 22% 24%;
+  --popover: 231 29% 14%;
+  --popover-foreground: 225 24% 94%;
+  --popover-border: 231 22% 24%;
+  --primary: 235 79% 70%;
+  --primary-foreground: 231 33% 10%;
+  --secondary: 231 22% 21%;
+  --secondary-foreground: 225 24% 94%;
+  --muted: 231 22% 19%;
+  --muted-foreground: 225 15% 67%;
+  --accent: 194 48% 22%;
+  --accent-foreground: 194 93% 91%;
+  --destructive: 0 63% 58%;
+  --destructive-foreground: 0 0% 100%;
+}
+
+@layer base {
+  * { @apply border-border; }
+  html { scroll-behavior: smooth; }
+  body { @apply font-sans antialiased bg-background text-foreground; }
+  button, a, input { -webkit-tap-highlight-color: transparent; }
+}
+
+@layer utilities {
+  .app-grid {
+    background-image: linear-gradient(rgba(106, 112, 191, 0.045) 1px, transparent 1px), linear-gradient(90deg, rgba(106, 112, 191, 0.045) 1px, transparent 1px);
+    background-size: 34px 34px;
+  }
+  .fade-up { animation: fade-up 500ms cubic-bezier(.22,.8,.3,1) both; }
+  .fade-up-delay-1 { animation-delay: 80ms; }
+  .fade-up-delay-2 { animation-delay: 160ms; }
+  .fade-up-delay-3 { animation-delay: 240ms; }
+  .pulse-soft { animation: pulse-soft 2.4s ease-in-out infinite; }
+  .shimmer { background: linear-gradient(90deg, hsl(var(--muted)) 25%, hsl(var(--card)) 50%, hsl(var(--muted)) 75%); background-size: 200% 100%; animation: shimmer 1.6s ease-in-out infinite; }
+}
+
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes pulse-soft {
+  0%, 100% { opacity: .55; transform: scale(.96); }
+  50% { opacity: 1; transform: scale(1); }
+}
+@keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }

@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "DeployAI"
+description = "A mobile-first deployment assistant that helps developers move projects from ZIP files or GitHub repositories to a live URL with AI-guided analysis and provider recommendations."
+version = "1.0.0"
+id = "artifacts/deploy-ai"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 20178
+
+[services.development]
+run = "pnpm --filter @workspace/deploy-ai run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/deploy-ai", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/deploy-ai/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "20178"
+BASE_PATH = "/"
