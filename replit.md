@@ -1,15 +1,17 @@
-# [Project name]
+# DeployAI
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+DeployAI guides users from project analysis to a secure static deployment and live URL.
 
 ## Run & Operate
 
-- `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
+- `pnpm --filter @workspace/api-server run dev` — run the API server (managed on port 8080 and proxied at `/api`)
+- `pnpm --filter @workspace/deploy-ai run dev` — run the DeployAI web app
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
 - Required env: `DATABASE_URL` — Postgres connection string
+- Required secret for real Netlify deploys: `NETLIFY_AUTH_TOKEN` — configure it through Replit Secrets; never place it in frontend code
 
 ## Stack
 
@@ -22,23 +24,32 @@ _Replace the heading above with the project's name, and this line with one sente
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `artifacts/deploy-ai/src/App.tsx` — mobile-first guided flow and Demo Mode/real deployment state
+- `artifacts/api-server/src/routes/deploy.ts` — Netlify deployment and health-check routes
+- `artifacts/api-server/src/lib/deploy/` — provider adapter, ZIP preparation, static safety validation, and deployment types
+- `artifacts/api-server/src/routes/health.ts` — API liveness route
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- Demo Mode is offline by design and never contacts Netlify.
+- Real deploys use a generic provider adapter boundary so another provider can be added without changing route responsibilities.
+- The prototype publishes only a server-prepared validated static ZIP and never executes uploaded project commands.
+- Health checks require public HTTPS and block private/local destinations and redirect responses.
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+Users can upload or connect a project, review AI-detected project details, explicitly choose a provider, approve a Netlify deployment, follow deployment stages, and open/copy a real healthy live URL. A separate sample flow simulates deployment without external calls.
+
+Provider selection supports Netlify (connected), Vercel (prototype Demo Mode), and Render (disabled as coming soon).
 
 ## User preferences
 
-_Populate as you build — explicit user instructions worth remembering across sessions._
+Keep the experience mobile-first, preserve Demo Mode as an offline path, and do not expose provider credentials in browser code.
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
+- Use the managed API and web workflows; application requests should use relative `/api/...` paths.
+- Test real deployment only after `NETLIFY_AUTH_TOKEN` is configured as a server secret.
 
 ## Pointers
 

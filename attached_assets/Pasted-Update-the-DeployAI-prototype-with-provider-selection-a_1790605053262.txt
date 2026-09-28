@@ -1,0 +1,155 @@
+Update the DeployAI prototype with provider selection and real live-project opening.
+
+Current problem:
+- Netlify is selected automatically.
+- The user cannot choose a deployment provider.
+- The "Open live project" button does not clearly open and demonstrate the deployed application.
+
+Required changes:
+
+1. Add a provider-selection screen after project analysis and before approval.
+
+Display these provider cards:
+
+Provider 1: Netlify
+- Provider type: Static hosting
+- Estimated cost: ₹0–₹500/month
+- Estimated deployment time: 30–60 seconds
+- Best for: React/Vite static projects
+- Status: Connected
+- Select button
+
+Provider 2: Vercel
+- Provider type: Frontend and serverless hosting
+- Estimated cost: ₹0–₹1,000/month
+- Estimated deployment time: 30–60 seconds
+- Best for: React, Next.js, and full-stack projects
+- Status: Prototype provider
+- Select button
+
+Provider 3: Render
+- Provider type: Backend and web services
+- Estimated cost: ₹0–₹1,500/month
+- Estimated deployment time: 1–3 minutes
+- Best for: Node.js, Python, and backend applications
+- Status: Coming soon
+- Disabled select button
+
+2. Do not automatically choose Netlify.
+
+The user must explicitly select a provider. Store the selected provider in application state:
+
+{
+  name: "Netlify",
+  id: "netlify",
+  estimatedCost: "₹0–₹500/month",
+  status: "connected"
+}
+
+3. Add visual states:
+- Unselected provider
+- Selected provider
+- Connected provider
+- Coming soon provider
+- Disabled provider
+
+Only one provider can be selected at a time.
+
+4. Add a Continue button.
+- Disable it until the user selects a provider.
+- When clicked, open the approval screen.
+- Show the selected provider on the approval screen.
+- Do not change the selected provider automatically.
+
+5. Provider deployment behavior:
+- If selectedProvider.id is "netlify", call the existing Netlify backend deployment endpoint.
+- If selectedProvider.id is "vercel", use Demo Mode for now and show:
+  "Vercel integration is prepared but not connected in this prototype."
+- If selectedProvider.id is "render", keep the provider disabled.
+
+6. Update the approval screen:
+Show:
+- Project name
+- Detected language
+- Detected framework
+- Selected provider
+- Estimated cost
+- Deployment type
+- Notice that pricing is an estimate
+- Approve and deploy button
+
+7. Update the deployment result state.
+
+Use this structure:
+
+{
+  provider: "Netlify",
+  providerId: "netlify",
+  status: "success",
+  liveUrl: "https://example.netlify.app",
+  health: "healthy",
+  projectName: "DeployAI Sample Project"
+}
+
+8. Fix the "Open live project" button:
+- If a real liveUrl exists, open that exact URL in a new browser tab using:
+  window.open(liveUrl, "_blank", "noopener,noreferrer")
+- If no liveUrl exists, disable the button and show:
+  "Live URL is not available yet."
+- Never use a fake URL for a real deployment result.
+
+9. Add a visible "View deployed project" section on the success screen:
+- Provider name
+- Live URL
+- Open live project button
+- Copy URL button
+- Deployment status: Healthy
+- Health-check timestamp
+- View deployment logs button
+
+10. Make the deployed project visibly demonstrate execution:
+When the user opens the live URL, it should show a real sample application, not a blank page.
+
+Create a sample deployed application called "DeployAI Sample Project" with:
+- A heading: "DeployAI deployment successful"
+- A message: "This project was analyzed, deployed, and tested by DeployAI."
+- A status badge: "Running"
+- A counter button
+- A small interactive task list
+- A "Deployment details" section
+- Provider name
+- Build command
+- Build time
+- Deployment timestamp
+
+The counter and task list must work in the browser so judges can see that the deployed project is executing.
+
+11. Add a "Test deployment" button before showing success:
+- Call the health-check endpoint using the returned live URL.
+- Confirm the response is successful.
+- Show:
+  "Health check passed — live project is responding."
+
+12. Keep Demo Mode:
+- Demo Mode must allow the user to select Netlify or Vercel.
+- Demo Mode must show the provider-selection experience.
+- Clearly label simulated deployments as:
+  "Demo mode: deployment simulated."
+- Demo Mode may use a sample live URL only if it is clearly labeled as simulated.
+- Real Netlify deployments must show the actual returned Netlify URL.
+
+13. Keep the mobile-first design:
+- Provider cards must work on an iQOO phone.
+- Use large touch-friendly buttons.
+- Add a clear selected checkmark.
+- Keep navigation responsive.
+- Do not remove existing screens or functionality.
+
+14. Add tests:
+- Test that no provider is selected initially.
+- Test that Continue is disabled initially.
+- Test that selecting Vercel changes the selected provider.
+- Test that selecting Netlify changes the selected provider.
+- Test that selecting one provider deselects the other.
+- Test that Open live project uses the returned liveUrl.
+- Test that the button is disabled when liveUrl is missing.

@@ -9,7 +9,7 @@ import NotFound from '@/pages/not-found';
 
 const queryClient = new QueryClient();
 
-type ProviderId = 'vercel' | 'railway';
+type ProviderId = 'netlify' | 'vercel' | 'render';
 type SourceKind = 'ZIP upload' | 'GitHub repository';
 
 type Project = {
@@ -44,18 +44,19 @@ const SAMPLE_PROJECT: Project = {
   confidence: 98,
 };
 
-const PROVIDERS: Record<ProviderId, { name: string; mark: string; description: string; cost: string; time: string; color: string }> = {
-  vercel: { name: 'Vercel', mark: 'V', description: 'Fast static hosting with zero-config previews.', cost: '₹0–₹500 / month', time: 'about 45 seconds', color: '#171c3a' },
-  railway: { name: 'Railway', mark: 'R', description: 'More control for teams with growing infrastructure needs.', cost: '₹500–₹1,500 / month', time: 'about 1 minute', color: '#5c49d8' },
+const PROVIDERS: Record<ProviderId, { name: string; mark: string; type: string; description: string; cost: string; time: string; bestFor: string; status: 'connected' | 'prototype' | 'coming-soon'; color: string }> = {
+  netlify: { name: 'Netlify', mark: 'N', type: 'Static hosting', description: 'Fast static hosting with simple, dependable deploys.', cost: '₹0–₹500/month', time: '30–60 seconds', bestFor: 'React/Vite static projects', status: 'connected', color: '#0e9f9a' },
+  vercel: { name: 'Vercel', mark: 'V', type: 'Frontend and serverless hosting', description: 'Optimized hosting for frontend and full-stack apps.', cost: '₹0–₹1,000/month', time: '30–60 seconds', bestFor: 'React, Next.js, and full-stack projects', status: 'prototype', color: '#171c3a' },
+  render: { name: 'Render', mark: 'R', type: 'Backend and web services', description: 'Managed services for APIs, workers, and backend apps.', cost: '₹0–₹1,500/month', time: '1–3 minutes', bestFor: 'Node.js, Python, and backend applications', status: 'coming-soon', color: '#5c49d8' },
 };
 
 const STAGES = [
-  { label: 'Preparing project', detail: 'Checking source files and deployment settings', icon: Layers3 },
-  { label: 'Installing dependencies', detail: 'Resolving 24 packages from package-lock.json', icon: PackageCheck },
-  { label: 'Running build', detail: 'Creating an optimized production bundle', icon: Terminal },
-  { label: 'Uploading files', detail: 'Sending dist/ to the edge network', icon: UploadCloud },
+  { label: 'Preparing deployment', detail: 'Validating the prepared static ZIP', icon: Layers3 },
+  { label: 'Creating Netlify site', detail: 'Reserving a site for this project', icon: Globe2 },
+  { label: 'Uploading files', detail: 'Sending the validated ZIP to Netlify', icon: UploadCloud },
+  { label: 'Waiting for Netlify', detail: 'Watching the production deployment status', icon: LoaderCircle },
   { label: 'Running health check', detail: 'Verifying your live URL responds correctly', icon: ShieldCheck },
-  { label: 'Generating live URL', detail: 'Assigning a secure address to your project', icon: Globe2 },
+  { label: 'Deployment complete', detail: 'Your live URL is ready to open', icon: Check },
 ];
 
 const ANALYSIS_STEPS = [
@@ -68,6 +69,20 @@ const ANALYSIS_STEPS = [
 ];
 
 type SourceMeta = Pick<Project, 'fileName' | 'fileType' | 'fileSize'>;
+type DeploymentLog = { message: string; timestamp: string };
+type DeploymentResult = {
+  provider: string;
+  providerId: ProviderId;
+  status: 'success' | 'ready';
+  liveUrl: string;
+  health: 'healthy' | 'pending';
+  projectName: string;
+  httpStatus: number | null;
+  buildTimeSeconds: number;
+  healthCheckedAt: string | null;
+  logs: DeploymentLog[];
+};
+type DeploymentError = { error: string; code?: string };
 
 function Button({ children, className = '', variant = 'primary', ...props }: { children: ReactNode; className?: string; variant?: 'primary' | 'secondary' | 'quiet' | 'danger' } & ButtonHTMLAttributes<HTMLButtonElement>) {
   const variants = {
@@ -141,7 +156,7 @@ function PageShell({ children, flowStep, className = '' }: { children: ReactNode
   );
 }
 
-function Home({ onChooseSource }: { onChooseSource: (source: SourceKind, fileName?: string, meta?: SourceMeta, destination?: string) => void }) {
+function Home({ onChooseSource }: { onChooseSource: (source: SourceKind, fileName?: string, meta?: SourceMeta, destination?: string, demoMode?: boolean) => void }) {
   const [, setLocation] = useLocation();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [githubOpen, setGithubOpen] = useState(false);
@@ -194,7 +209,7 @@ function Home({ onChooseSource }: { onChooseSource: (source: SourceKind, fileNam
              fileName: SAMPLE_PROJECT.fileName,
              fileType: SAMPLE_PROJECT.fileType,
              fileSize: SAMPLE_PROJECT.fileSize,
-           }, '/analysis')} className="mt-5 inline-flex items-center gap-2 text-xs font-bold text-[#5965df] transition-colors hover:text-[#3f48b8]" data-testid="button-try-sample">
+           }, '/analysis', true)} className="mt-5 inline-flex items-center gap-2 text-xs font-bold text-[#5965df] transition-colors hover:text-[#3f48b8]" data-testid="button-try-sample">
              <WandSparkles size={14} /> Try Demo with sample project <ChevronRight size={14} />
           </button>
           <div className="mt-12 flex items-center gap-6 border-t border-[#e3e6f2] pt-5 text-[11px] font-semibold text-[#8b91ac]">
@@ -223,9 +238,13 @@ function Home({ onChooseSource }: { onChooseSource: (source: SourceKind, fileNam
               </div>
               <div className="flex items-center gap-3 rounded-xl border border-[#dfe3ff] bg-[#f5f6ff] p-4">
                 <div className="grid size-9 place-items-center rounded-lg bg-white text-[#5965df] shadow-sm"><Lightbulb size={17} /></div>
-                <div><p className="text-xs font-bold text-[#3f4775]">A good fit for Vercel</p><p className="mt-0.5 text-[11px] leading-4 text-[#7c83a2]">Fast static hosting, no configuration needed.</p></div>
+                 <div><p className="text-xs font-bold text-[#3f4775]">A good fit for Netlify</p><p className="mt-0.5 text-[11px] leading-4 text-[#7c83a2]">Fast static hosting, no configuration needed.</p></div>
               </div>
-              <button onClick={() => setLocation('/analysis')} className="flex w-full items-center justify-between rounded-xl bg-[#5965df] px-4 py-3.5 text-left text-sm font-bold text-white shadow-[0_8px_18px_rgba(89,101,223,.2)] transition hover:bg-[#4e59d0]" data-testid="button-preview-deploy">
+              <button onClick={() => onChooseSource('ZIP upload', 'launchpad-web', {
+                fileName: SAMPLE_PROJECT.fileName,
+                fileType: SAMPLE_PROJECT.fileType,
+                fileSize: SAMPLE_PROJECT.fileSize,
+              }, '/analysis', true)} className="flex w-full items-center justify-between rounded-xl bg-[#5965df] px-4 py-3.5 text-left text-sm font-bold text-white shadow-[0_8px_18px_rgba(89,101,223,.2)] transition hover:bg-[#4e59d0]" data-testid="button-preview-deploy">
                 <span className="flex items-center gap-2"><Rocket size={16} /> Review deployment</span><ArrowRight size={16} />
               </button>
             </div>
@@ -323,18 +342,18 @@ function FolderIcon(props: { size?: number }) {
   return <FileText {...props} />;
 }
 
-function Providers({ provider, setProvider, setLocation }: { provider: ProviderId; setProvider: (provider: ProviderId) => void; setLocation: (path: string) => void }) {
+function Providers({ provider, setProvider, setLocation }: { provider: ProviderId | null; setProvider: (provider: ProviderId) => void; setLocation: (path: string) => void }) {
   return <PageShell flowStep={2}>
     <div className="mx-auto max-w-[960px]">
-      <div className="fade-up"><p className="font-mono text-[11px] font-medium uppercase tracking-[.16em] text-[#5965df]">02 / Deployment provider</p><h1 className="mt-3 text-3xl font-extrabold tracking-[-.06em] text-[#292e59] sm:text-4xl">Pick your launch lane.</h1><p className="mt-2 max-w-xl text-sm leading-6 text-[#757d9e]">Both options fit your project. We’ve highlighted the trade-offs so you can make the call with confidence.</p></div>
-      <div className="mt-8 grid gap-5 lg:grid-cols-2">{(Object.keys(PROVIDERS) as ProviderId[]).map((id) => { const item = PROVIDERS[id]; const selected = provider === id; return <button key={id} onClick={() => setProvider(id)} className={`relative text-left rounded-2xl border p-6 transition-all duration-200 ${selected ? 'border-[#5965df] bg-[#f7f7ff] shadow-[0_12px_35px_rgba(89,101,223,.12)]' : 'border-[#e1e4f1] bg-white hover:-translate-y-0.5 hover:border-[#b9c0ed] hover:shadow-[var(--shadow-card)]'}`} data-testid={`card-provider-${id}`}><div className="flex items-start justify-between"><div className="flex items-center gap-3"><span className="grid size-11 place-items-center rounded-xl text-lg font-extrabold text-white" style={{ backgroundColor: item.color }}>{item.mark}</span><div><h2 className="font-extrabold tracking-[-.03em] text-[#303762]">{item.name}</h2><p className="mt-0.5 text-xs text-[#8990ad]">{item.description}</p></div></div><span className={`grid size-6 place-items-center rounded-full border ${selected ? 'border-[#5965df] bg-[#5965df] text-white' : 'border-[#d6d9e8] text-transparent'}`}><Check size={13} strokeWidth={3} /></span></div><div className="mt-7 grid grid-cols-2 divide-x divide-[#e6e8f2] rounded-xl bg-white p-4 shadow-sm"><div><p className="text-[10px] font-bold uppercase tracking-[.1em] text-[#a0a6be]">Estimated cost</p><p className="mt-1.5 text-sm font-extrabold text-[#414a76]">{item.cost}</p></div><div className="pl-4"><p className="text-[10px] font-bold uppercase tracking-[.1em] text-[#a0a6be]">First deploy</p><p className="mt-1.5 text-sm font-extrabold text-[#414a76]">{item.time}</p></div></div>{id === 'vercel' && <span className="absolute -top-3 left-5 rounded-full bg-[#5965df] px-2.5 py-1 text-[10px] font-bold uppercase tracking-[.1em] text-white">AI recommendation</span>}</button> })}</div>
-       <div className="mt-5 flex gap-3 rounded-2xl border border-[#d6e3f0] bg-[#f1f8fc] p-5"><div className="grid size-9 shrink-0 place-items-center rounded-lg bg-white text-[#4386a6] shadow-sm"><WandSparkles size={17} /></div><div><p className="text-xs font-bold text-[#3f5974]">DeployAI recommends Vercel for this project</p><p className="mt-1 text-sm leading-6 text-[#668099]">This project produces static build files, so a static hosting provider is sufficient and more cost-effective.</p></div></div>
-      <div className="mt-8 flex flex-col-reverse justify-between gap-3 sm:flex-row sm:items-center"><Button variant="quiet" onClick={() => setLocation('/analysis')} data-testid="button-back-analysis"><ArrowLeft size={15} /> Back to analysis</Button><Button onClick={() => setLocation('/approve')} data-testid="button-continue-approve">Review launch details <ArrowRight size={16} /></Button></div>
+      <div className="fade-up"><p className="font-mono text-[11px] font-medium uppercase tracking-[.16em] text-[#5965df]">02 / Deployment provider</p><h1 className="mt-3 text-3xl font-extrabold tracking-[-.06em] text-[#292e59] sm:text-4xl">Choose where to launch.</h1><p className="mt-2 max-w-xl text-sm leading-6 text-[#757d9e]">Select one provider to continue. Netlify is connected for real deployments; Vercel is available as a prototype path.</p></div>
+      <div className="mt-8 grid gap-5 lg:grid-cols-3">{(Object.keys(PROVIDERS) as ProviderId[]).map((id) => { const item = PROVIDERS[id]; const selected = provider === id; const available = item.status !== 'coming-soon'; const statusLabel = item.status === 'connected' ? 'Connected' : item.status === 'prototype' ? 'Prototype provider' : 'Coming soon'; return <button key={id} onClick={() => available && setProvider(id)} disabled={!available} className={`relative text-left rounded-2xl border p-5 transition-all duration-200 ${selected ? 'border-[#5965df] bg-[#f7f7ff] shadow-[0_12px_35px_rgba(89,101,223,.12)]' : 'border-[#e1e4f1] bg-white hover:-translate-y-0.5 hover:border-[#b9c0ed] hover:shadow-[var(--shadow-card)]'} ${!available ? 'cursor-not-allowed opacity-65' : ''}`} data-testid={`card-provider-${id}`}><div className="flex items-start justify-between"><div className="flex items-center gap-3"><span className="grid size-11 place-items-center rounded-xl text-lg font-extrabold text-white" style={{ backgroundColor: item.color }}>{item.mark}</span><div><h2 className="font-extrabold tracking-[-.03em] text-[#303762]">{item.name}</h2><p className="mt-0.5 text-[11px] text-[#8990ad]">{item.type}</p></div></div><span className={`grid size-6 place-items-center rounded-full border ${selected ? 'border-[#5965df] bg-[#5965df] text-white' : 'border-[#d6d9e8] text-transparent'}`}><Check size={13} strokeWidth={3} /></span></div><p className="mt-4 min-h-10 text-xs leading-5 text-[#8990ad]">{item.bestFor}</p><div className="mt-4 space-y-2 border-t border-[#eceef6] pt-4 text-[11px]"><div className="flex justify-between gap-2"><span className="text-[#a0a6be]">Cost</span><strong className="text-[#414a76]">{item.cost}</strong></div><div className="flex justify-between gap-2"><span className="text-[#a0a6be]">Deploy</span><strong className="text-[#414a76]">{item.time}</strong></div><div className="flex justify-between gap-2"><span className="text-[#a0a6be]">Status</span><strong className={item.status === 'connected' ? 'text-[#3d9e95]' : 'text-[#8d94ad]'}>{statusLabel}</strong></div></div>{id === 'netlify' && <span className="absolute -top-3 left-5 rounded-full bg-[#5965df] px-2.5 py-1 text-[10px] font-bold uppercase tracking-[.1em] text-white">AI recommendation</span>}</button> })}</div>
+       <div className="mt-5 flex gap-3 rounded-2xl border border-[#d6e3f0] bg-[#f1f8fc] p-5"><div className="grid size-9 shrink-0 place-items-center rounded-lg bg-white text-[#4386a6] shadow-sm"><WandSparkles size={17} /></div><div><p className="text-xs font-bold text-[#3f5974]">DeployAI recommends Netlify for this project</p><p className="mt-1 text-sm leading-6 text-[#668099]">This project produces static build files, so a static hosting provider is sufficient and more cost-effective.</p></div></div>
+       <div className="mt-8 flex flex-col-reverse justify-between gap-3 sm:flex-row sm:items-center"><Button variant="quiet" onClick={() => setLocation('/analysis')} data-testid="button-back-analysis"><ArrowLeft size={15} /> Back to analysis</Button><Button onClick={() => setLocation('/approve')} disabled={!provider} data-testid="button-continue-approve">{provider ? 'Review launch details' : 'Select a provider to continue'} <ArrowRight size={16} /></Button></div>
     </div>
   </PageShell>;
 }
 
-function Approve({ project, provider, setProject, setLocation }: { project: Project; provider: ProviderId; setProject: (project: Project) => void; setLocation: (path: string) => void }) {
+function Approve({ project, provider, demoMode, onApprove, setLocation }: { project: Project; provider: ProviderId; demoMode: boolean; onApprove: (name: string) => void; setLocation: (path: string) => void }) {
   const choice = PROVIDERS[provider];
   const [name, setName] = useState(project.name);
   return <PageShell flowStep={3}>
@@ -342,10 +361,10 @@ function Approve({ project, provider, setProject, setLocation }: { project: Proj
       <div className="fade-up"><p className="font-mono text-[11px] font-medium uppercase tracking-[.16em] text-[#5965df]">03 / Final review</p><h1 className="mt-3 text-3xl font-extrabold tracking-[-.06em] text-[#292e59] sm:text-4xl">Ready when you are.</h1><p className="mt-2 text-sm leading-6 text-[#757d9e]">One last look before DeployAI sends your project into the world.</p></div>
       <div className="mt-8 overflow-hidden rounded-2xl border border-[#e1e4f1] bg-white shadow-[var(--shadow-card)]">
         <div className="grid gap-6 p-6 sm:grid-cols-[1.05fr_.95fr] sm:p-8">
-          <div><label className="text-xs font-bold text-[#4c557e]">Project name<input value={name} onChange={(event) => setName(event.target.value)} className="mt-2 h-12 w-full rounded-xl border border-[#dfe2f1] bg-[#fbfbff] px-3.5 text-sm font-semibold text-[#39416c] outline-none transition focus:border-[#5965df] focus:ring-4 focus:ring-[#5965df]/10" data-testid="input-project-name" /></label><div className="mt-7 space-y-5"><ReviewRow icon={Code2} label="Detected technology" value={`${project.framework} · ${project.language}`} /><ReviewRow icon={Globe2} label="Deployment provider" value={choice.name} mark={choice.mark} /><ReviewRow icon={Clock3} label="Estimated first deploy" value={choice.time} /></div></div>
+          <div><label className="text-xs font-bold text-[#4c557e]">Project name<input value={name} onChange={(event) => setName(event.target.value)} className="mt-2 h-12 w-full rounded-xl border border-[#dfe2f1] bg-[#fbfbff] px-3.5 text-sm font-semibold text-[#39416c] outline-none transition focus:border-[#5965df] focus:ring-4 focus:ring-[#5965df]/10" data-testid="input-project-name" /></label><div className="mt-7 space-y-5"><ReviewRow icon={Code2} label="Detected language" value={project.language} /><ReviewRow icon={Layers3} label="Detected framework" value={project.framework} /><ReviewRow icon={Globe2} label="Selected provider" value={choice.name} mark={choice.mark} /><ReviewRow icon={Clock3} label="Deployment type" value={choice.type} /><ReviewRow icon={Clock3} label="Estimated deploy" value={choice.time} /></div></div>
            <div className="rounded-2xl bg-[#f5f6ff] p-5"><p className="text-xs font-bold uppercase tracking-[.12em] text-[#858cac]">Estimated monthly cost</p><p className="mt-3 text-3xl font-extrabold tracking-[-.07em] text-[#5965df]" data-testid="text-estimated-cost">{choice.cost}</p><p className="mt-2 text-[11px] leading-5 text-[#7f87a8]">This is an estimate. Your provider may charge based on usage.</p><div className="my-5 h-px bg-[#dfe2f5]" /><p className="text-xs font-bold text-[#4d567f]">What happens next</p><ul className="mt-3 space-y-3 text-xs leading-5 text-[#737b9c]"><li className="flex gap-2"><Check size={14} className="mt-0.5 shrink-0 text-[#45aaa0]" /> Install dependencies in an isolated build</li><li className="flex gap-2"><Check size={14} className="mt-0.5 shrink-0 text-[#45aaa0]" /> Build and publish your static files</li><li className="flex gap-2"><Check size={14} className="mt-0.5 shrink-0 text-[#45aaa0]" /> Run a health check on the live URL</li></ul></div>
         </div>
-        <div className="flex flex-col-reverse gap-3 border-t border-[#eceef6] bg-[#fcfcff] p-5 sm:flex-row sm:items-center sm:justify-between sm:px-8"><Button variant="quiet" onClick={() => setLocation('/providers')} data-testid="button-back-providers"><ArrowLeft size={15} /> Change provider</Button><Button onClick={() => { setProject({ ...project, name: name.trim() || 'launchpad-web' }); setLocation('/deploying'); }} data-testid="button-approve-deploy"><Rocket size={16} /> Approve & deploy <ArrowRight size={16} /></Button></div>
+        <div className="flex flex-col-reverse gap-3 border-t border-[#eceef6] bg-[#fcfcff] p-5 sm:flex-row sm:items-center sm:justify-between sm:px-8"><Button variant="quiet" onClick={() => setLocation('/providers')} data-testid="button-back-providers"><ArrowLeft size={15} /> Change provider</Button><Button onClick={() => onApprove(name.trim() || 'launchpad-web')} data-testid="button-approve-deploy"><Rocket size={16} /> {demoMode ? 'Try demo deployment' : 'Approve and deploy'} <ArrowRight size={16} /></Button></div>
       </div>
       <p className="mt-5 flex justify-center gap-1.5 text-center text-[11px] text-[#979db6]"><LockKeyhole size={13} /> You can disconnect this deployment at any time.</p>
     </div>
@@ -356,45 +375,106 @@ function ReviewRow({ icon: Icon, label, value, mark }: { icon: LucideIcon; label
   return <div className="flex items-center gap-3"><span className="grid size-9 place-items-center rounded-lg bg-[#f0f1ff] text-[#5965df]">{mark ? <span className="text-xs font-extrabold">{mark}</span> : <Icon size={16} />}</span><div><p className="text-[11px] font-semibold text-[#959bb4]">{label}</p><p className="mt-0.5 text-sm font-bold text-[#444c77]">{value}</p></div></div>;
 }
 
-function Deploying({ project, provider, setLocation }: { project: Project; provider: ProviderId; setLocation: (path: string) => void }) {
+function Deploying({ project, provider, demoMode, deploymentError, setLocation, setDeploymentResult, setDeploymentError }: { project: Project; provider: ProviderId; demoMode: boolean; deploymentError: DeploymentError | null; setLocation: (path: string) => void; setDeploymentResult: (result: DeploymentResult) => void; setDeploymentError: (error: DeploymentError | null) => void }) {
   const [active, setActive] = useState(0);
+  const [readyResult, setReadyResult] = useState<DeploymentResult | null>(null);
+  const [healthMessage, setHealthMessage] = useState('');
+  const [testing, setTesting] = useState(false);
+  const startedRef = useRef(false);
+  const simulation = demoMode || provider === 'vercel';
+  const simulationMessage = provider === 'vercel' ? 'Vercel integration is prepared but not connected in this prototype. Demo mode: deployment simulated.' : 'Demo mode: deployment simulated';
+
   useEffect(() => {
-    const timer = window.setInterval(() => setActive((value) => value < STAGES.length ? value + 1 : value), 1350);
-    return () => window.clearInterval(timer);
-  }, []);
-  useEffect(() => {
-    if (active >= STAGES.length) {
-      const timer = window.setTimeout(() => setLocation('/success'), 800);
-      return () => window.clearTimeout(timer);
+    if (startedRef.current) return;
+    startedRef.current = true;
+    setDeploymentError(null);
+    if (simulation) {
+      const timer = window.setInterval(() => setActive((value) => value < STAGES.length ? value + 1 : value), 650);
+      const redirect = window.setTimeout(() => {
+        window.clearInterval(timer);
+        const liveUrl = `https://${project.name}-${provider}.deployai.app`;
+        setDeploymentResult({ provider: PROVIDERS[provider].name, providerId: provider, status: 'success', liveUrl, health: 'healthy', projectName: project.name, httpStatus: 200, buildTimeSeconds: 6, healthCheckedAt: new Date().toISOString(), logs: [{ timestamp: new Date().toISOString(), message: simulationMessage }] });
+        setLocation('/success');
+      }, 4_400);
+      return () => { window.clearInterval(timer); window.clearTimeout(redirect); };
     }
-    return undefined;
-  }, [active, setLocation]);
+    let cancelled = false;
+    const progress = window.setInterval(() => setActive((value) => value < STAGES.length - 2 ? value + 1 : value), 2_500);
+    const deploy = async () => {
+      setActive(1);
+      try {
+        const response = await fetch('/api/deploy/netlify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectName: project.name, provider }) });
+        const payload = await response.json() as DeploymentResult | DeploymentError;
+        if (!response.ok || !('liveUrl' in payload)) throw payload as DeploymentError;
+        if (cancelled) return;
+        window.clearInterval(progress);
+        setReadyResult(payload);
+        setActive(4);
+      } catch (error) {
+        if (cancelled) return;
+        window.clearInterval(progress);
+        setDeploymentError((error && typeof error === 'object' && 'error' in error) ? error as DeploymentError : { error: 'Deployment failed. Please try again.' });
+      }
+    };
+    void deploy();
+    return () => { cancelled = true; window.clearInterval(progress); };
+  }, [demoMode, project.name, provider, simulation, simulationMessage, setDeploymentError, setDeploymentResult, setLocation]);
+
+  const testDeployment = async () => {
+    if (!readyResult) return;
+    setTesting(true);
+    setDeploymentError(null);
+    try {
+      const response = await fetch(`/api/deploy/health?url=${encodeURIComponent(readyResult.liveUrl)}`);
+      const payload = await response.json() as { status?: string; httpStatus?: number; error?: string };
+      if (!response.ok || payload.status !== 'Healthy') throw { error: payload.error ?? 'Health check failed.' };
+      const completed = { ...readyResult, health: 'healthy' as const, httpStatus: payload.httpStatus ?? 200, healthCheckedAt: new Date().toISOString(), logs: [...readyResult.logs, { timestamp: new Date().toISOString(), message: 'Health check passed — live project is responding.' }] };
+      setHealthMessage('Health check passed — live project is responding.');
+      setDeploymentResult(completed);
+      setActive(STAGES.length);
+      window.setTimeout(() => setLocation('/success'), 650);
+    } catch (error) {
+      setDeploymentError((error && typeof error === 'object' && 'error' in error) ? error as DeploymentError : { error: 'Health check failed. Please try again.' });
+    } finally {
+      setTesting(false);
+    }
+  };
   const percent = Math.min(100, Math.round((active / STAGES.length) * 100));
   return <PageShell flowStep={3}>
     <div className="mx-auto max-w-[720px]">
-      <div className="text-center fade-up"><div className="mx-auto mb-5 grid size-14 place-items-center rounded-2xl bg-[#e9ebff] text-[#5965df] shadow-[0_0_0_8px_rgba(233,235,255,.65)]"><Rocket size={25} className={active < STAGES.length ? 'pulse-soft' : ''} /></div><p className="font-mono text-[11px] font-medium uppercase tracking-[.16em] text-[#5965df]">Launch sequence / {provider}</p><h1 className="mt-3 text-3xl font-extrabold tracking-[-.06em] text-[#292e59] sm:text-4xl">{active >= STAGES.length ? 'Everything is live.' : `Launching ${project.name}`}</h1><p className="mt-2 text-sm text-[#757d9e]">{active >= STAGES.length ? 'Redirecting you to your project status.' : 'Stay close. We’re taking care of the technical details.'}</p></div>
+      <div className="text-center fade-up"><div className="mx-auto mb-5 grid size-14 place-items-center rounded-2xl bg-[#e9ebff] text-[#5965df] shadow-[0_0_0_8px_rgba(233,235,255,.65)]"><Rocket size={25} className={active < STAGES.length ? 'pulse-soft' : ''} /></div><p className="font-mono text-[11px] font-medium uppercase tracking-[.16em] text-[#5965df]">Launch sequence / {PROVIDERS[provider].name}</p><h1 className="mt-3 text-3xl font-extrabold tracking-[-.06em] text-[#292e59] sm:text-4xl">{active >= STAGES.length ? 'Everything is live.' : `Launching ${project.name}`}</h1><p className="mt-2 text-sm text-[#757d9e]">{simulation ? simulationMessage : active >= STAGES.length ? 'Redirecting you to your project status.' : 'Stay close. We’re taking care of the technical details.'}</p></div>
       <div className="mt-9 rounded-2xl border border-[#e1e4f1] bg-white p-6 shadow-[var(--shadow-card)] sm:p-8"><div className="flex items-center justify-between"><span className="text-xs font-bold text-[#545c84]">Deployment progress</span><span className="font-mono text-xs font-medium text-[#5965df]" data-testid="text-deployment-progress">{percent}%</span></div><div className="mt-3 h-2 overflow-hidden rounded-full bg-[#e8eaf4]"><div className="h-full rounded-full bg-[#5965df] transition-all duration-500" style={{ width: `${percent}%` }} /></div><div className="mt-7 space-y-1">{STAGES.map(({ label, detail, icon: Icon }, index) => { const done = index < active; const working = index === active && active < STAGES.length; return <div key={label} className={`flex items-center gap-4 rounded-xl px-3 py-3 transition-colors ${working ? 'bg-[#f5f6ff]' : ''}`} data-testid={`status-stage-${index}`}><span className={`grid size-9 shrink-0 place-items-center rounded-lg ${done ? 'bg-[#e7f8f6] text-[#3d9e95]' : working ? 'bg-[#e9ebff] text-[#5965df]' : 'bg-[#f1f2f7] text-[#a2a8bd]'}`}>{done ? <Check size={17} strokeWidth={2.8} /> : working ? <LoaderCircle size={17} className="animate-spin" /> : <Icon size={16} />}</span><div className="min-w-0 flex-1"><p className={`text-sm font-bold ${done || working ? 'text-[#414a76]' : 'text-[#9ca2b7]'}`}>{label}</p><p className={`mt-0.5 truncate text-xs ${done || working ? 'text-[#8189a6]' : 'text-[#b1b5c7]'}`}>{detail}</p></div><span className={`text-[10px] font-bold uppercase tracking-[.1em] ${done ? 'text-[#3d9e95]' : working ? 'text-[#5965df]' : 'text-[#afb3c5]'}`}>{done ? 'done' : working ? 'working' : 'queued'}</span></div> })}</div></div>
-      <p className="mt-6 flex justify-center items-center gap-2 text-xs text-[#9299b2]"><CircleAlert size={14} /> Safe to keep this tab open while we finish.</p>
+      {readyResult && !simulation && <div className="mt-5 rounded-2xl border border-[#cfd5ff] bg-[#f4f5ff] p-5 text-left"><p className="text-sm font-bold text-[#414a76]">Deployment uploaded successfully.</p><p className="mt-1 text-sm leading-6 text-[#757d9e]">Test the returned live URL before opening the success screen.</p><Button onClick={testDeployment} disabled={testing} className="mt-4" data-testid="button-test-deployment">{testing ? <><LoaderCircle size={16} className="animate-spin" /> Testing deployment</> : <><ShieldCheck size={16} /> Test deployment</>}</Button>{healthMessage && <p className="mt-3 text-sm font-bold text-[#3d9e95]" data-testid="text-health-check-passed">{healthMessage}</p>}</div>}
+      {deploymentError && <div className="mt-5 rounded-2xl border border-[#f3c7ca] bg-[#fff8f8] p-5 text-left" data-testid="panel-deployment-error"><div className="flex gap-3"><CircleAlert size={18} className="mt-0.5 shrink-0 text-[#b34e58]" /><div><p className="text-sm font-bold text-[#8f4049]">Deployment could not finish</p><p className="mt-1 text-sm leading-6 text-[#a15b62]">{deploymentError.error}</p><div className="mt-4 flex flex-col gap-2 sm:flex-row"><Button variant="danger" onClick={() => setLocation('/approve')} data-testid="button-retry-deployment">Try again</Button><Button variant="quiet" onClick={() => setLocation('/providers')} data-testid="button-back-deployment-provider">Change provider</Button></div></div></div></div>}
+      <p className="mt-6 flex justify-center items-center gap-2 text-xs text-[#9299b2]"><CircleAlert size={14} /> {simulation ? 'This provider path does not contact Netlify.' : 'Safe to keep this tab open while we finish.'}</p>
     </div>
   </PageShell>;
 }
 
-function Success({ project, provider }: { project: Project; provider: ProviderId }) {
+function Success({ project, provider, demoMode, deploymentResult }: { project: Project; provider: ProviderId; demoMode: boolean; deploymentResult: DeploymentResult | null }) {
   const [copied, setCopied] = useState(false);
   const [logsOpen, setLogsOpen] = useState(false);
   const [opened, setOpened] = useState(false);
-  const url = `launchpad-web-${provider}.deployai.app`;
+  const liveUrl = deploymentResult?.liveUrl ?? '';
+  const simulated = demoMode || provider === 'vercel';
   const copyUrl = async () => {
-    try { await navigator.clipboard.writeText(`https://${url}`); } catch { /* Clipboard permissions can be unavailable in preview. */ }
+    if (!liveUrl) return;
+    try { await navigator.clipboard.writeText(liveUrl); } catch { /* Clipboard permissions can be unavailable in preview. */ }
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1800);
   };
   return <PageShell flowStep={3}>
     <div className="mx-auto max-w-[760px] text-center">
-      <div className="fade-up"><div className="relative mx-auto mb-6 grid size-20 place-items-center rounded-[1.6rem] bg-[#e5f8f5] text-[#3d9e95] shadow-[0_0_0_10px_rgba(229,248,245,.7)]"><Check size={39} strokeWidth={2.2} /><span className="absolute -right-1 -top-1 size-3 rounded-full bg-[#f2bd68]" /></div><p className="font-mono text-[11px] font-medium uppercase tracking-[.16em] text-[#3d9e95]">Deployment complete</p><h1 className="mt-3 text-4xl font-extrabold tracking-[-.07em] text-[#292e59] sm:text-5xl">You’re live.</h1><p className="mx-auto mt-3 max-w-md text-sm leading-6 text-[#757d9e]">The first version of <span className="font-bold text-[#4b537d]">{project.name}</span> is now available to the world.</p></div>
-       <div className="mt-9 rounded-2xl border border-[#d9e9e6] bg-white p-5 text-left shadow-[var(--shadow-card)] sm:p-7"><div className="flex items-center justify-between border-b border-[#edf0f4] pb-5"><div className="flex items-center gap-3"><span className="grid size-10 place-items-center rounded-xl bg-[#e7f8f6] text-[#3d9e95]"><Globe2 size={18} /></span><div><p className="text-[11px] font-semibold uppercase tracking-[.1em] text-[#9aa1b7]">Project status</p><p className="mt-0.5 text-sm font-extrabold text-[#3d9e95]" data-testid="status-project-live">Healthy</p></div></div><span className="rounded-full bg-[#e8f8f5] px-2.5 py-1 text-[10px] font-bold text-[#3d9e95]">HTTP 200</span></div><div className="mt-5 grid gap-4 sm:grid-cols-[1fr_auto]"><div><p className="text-[11px] font-bold uppercase tracking-[.1em] text-[#9aa1b7]">Live URL</p><div className="mt-2 flex flex-col gap-3 sm:flex-row"><div className="flex min-h-12 flex-1 items-center rounded-xl border border-[#dfe2f1] bg-[#fbfbff] px-3.5 font-mono text-sm text-[#5965df]" data-testid="text-live-url">https://{url}</div><Button variant="secondary" onClick={copyUrl} className="shrink-0" data-testid="button-copy-url">{copied ? <Check size={16} className="text-[#3d9e95]" /> : <Copy size={16} />} {copied ? 'Copied' : 'Copy URL'}</Button></div></div><div className="rounded-xl bg-[#f5f6ff] px-4 py-3 sm:min-w-32"><p className="text-[10px] font-bold uppercase tracking-[.1em] text-[#9aa1b7]">Build time</p><p className="mt-1 text-lg font-extrabold text-[#5965df]">42 seconds</p></div></div><div className="mt-6 flex flex-col gap-3 sm:flex-row"><Button onClick={() => setOpened(true)} className="flex-1" data-testid="button-open-live"><ExternalLink size={16} /> {opened ? 'Opening live project' : 'Open live project'}</Button><Button variant="secondary" onClick={() => setLogsOpen(!logsOpen)} className="flex-1" data-testid="button-view-logs"><FileText size={16} /> {logsOpen ? 'Hide deployment logs' : 'View logs'}</Button></div>{logsOpen && <div className="mt-5 overflow-hidden rounded-xl bg-[#20254a] p-4 font-mono text-[11px] leading-6 text-[#c4caf1]" data-testid="panel-deployment-logs"><p><span className="text-[#72d2c7]">09:41:02</span> build completed in 42s</p><p><span className="text-[#72d2c7]">09:41:03</span> uploaded 24 files to edge</p><p><span className="text-[#72d2c7]">09:41:04</span> health check returned HTTP 200</p><p><span className="text-[#f4c477]">09:41:04</span> deployment marked live</p></div>}</div>
-       <div className="mt-6 flex flex-col items-center justify-center gap-3 text-xs text-[#9299b2] sm:flex-row sm:gap-6"><span className="flex items-center gap-1.5"><ShieldCheck size={14} className="text-[#3d9e95]" /> SSL active</span><span className="flex items-center gap-1.5"><Server size={14} className="text-[#5965df]" /> Hosted on {PROVIDERS[provider].name}</span><Link href="/" className="font-bold text-[#5965df] hover:text-[#3e49b8]" data-testid="link-deploy-another">Deploy another project <ArrowRight size={13} className="inline" /></Link></div>
-       <Link href="/" className="mx-auto mt-6 flex min-h-11 w-full max-w-xs items-center justify-center gap-2 rounded-xl border border-[#d9ddf1] bg-white px-4 text-sm font-semibold text-[#252b59] transition hover:border-[#aeb6ea] hover:bg-[#f8f8ff]" data-testid="button-deploy-another"><Rocket size={16} /> Deploy another project</Link>
+      <div className="fade-up"><div className="relative mx-auto mb-6 grid size-20 place-items-center rounded-[1.6rem] bg-[#e5f8f5] text-[#3d9e95] shadow-[0_0_0_10px_rgba(229,248,245,.7)]"><Check size={39} strokeWidth={2.2} /><span className="absolute -right-1 -top-1 size-3 rounded-full bg-[#f2bd68]" /></div><p className="font-mono text-[11px] font-medium uppercase tracking-[.16em] text-[#3d9e95]">Deployment complete</p>{simulated && <span className="mt-3 inline-flex rounded-full bg-[#fff4df] px-3 py-1.5 text-xs font-bold text-[#a66a1e]" data-testid="text-demo-mode">Demo mode: deployment simulated</span>}<h1 className="mt-3 text-4xl font-extrabold tracking-[-.07em] text-[#292e59] sm:text-5xl">You’re live.</h1><p className="mx-auto mt-3 max-w-md text-sm leading-6 text-[#757d9e]">The first version of <span className="font-bold text-[#4b537d]">{project.name}</span> is now available to the world.</p></div>
+      <div className="mt-9 rounded-2xl border border-[#d9e9e6] bg-white p-5 text-left shadow-[var(--shadow-card)] sm:p-7">
+        <div className="flex items-center justify-between border-b border-[#edf0f4] pb-5"><div className="flex items-center gap-3"><span className="grid size-10 place-items-center rounded-xl bg-[#e7f8f6] text-[#3d9e95]"><Globe2 size={18} /></span><div><p className="text-[11px] font-semibold uppercase tracking-[.1em] text-[#9aa1b7]">View deployed project</p><p className="mt-0.5 text-sm font-extrabold text-[#3d9e95]" data-testid="status-project-live">{deploymentResult?.health === 'healthy' ? 'Healthy' : 'Simulated'}</p></div></div><span className="rounded-full bg-[#e8f8f5] px-2.5 py-1 text-[10px] font-bold text-[#3d9e95]">HTTP {deploymentResult?.httpStatus ?? 200}</span></div>
+        <div className="mt-5 grid gap-4 sm:grid-cols-[1fr_auto]"><div><p className="text-[11px] font-bold uppercase tracking-[.1em] text-[#9aa1b7]">Live URL</p><div className="mt-2 flex flex-col gap-3 sm:flex-row"><div className="flex min-h-12 flex-1 items-center rounded-xl border border-[#dfe2f1] bg-[#fbfbff] px-3.5 font-mono text-sm text-[#5965df]" data-testid="text-live-url">{liveUrl || 'Live URL is not available yet.'}</div><Button variant="secondary" onClick={copyUrl} disabled={!liveUrl} className="shrink-0" data-testid="button-copy-url">{copied ? <Check size={16} className="text-[#3d9e95]" /> : <Copy size={16} />} {copied ? 'Copied' : 'Copy URL'}</Button></div></div><div className="rounded-xl bg-[#f5f6ff] px-4 py-3 sm:min-w-32"><p className="text-[10px] font-bold uppercase tracking-[.1em] text-[#9aa1b7]">Build time</p><p className="mt-1 text-lg font-extrabold text-[#5965df]">{deploymentResult?.buildTimeSeconds ?? 0} seconds</p></div></div>
+        <div className="mt-4 grid gap-3 rounded-xl border border-[#edf0f4] bg-[#fcfcff] p-4 text-xs sm:grid-cols-2"><div><p className="text-[#9aa1b7]">Provider</p><p className="mt-1 font-bold text-[#414a76]">{deploymentResult?.provider ?? PROVIDERS[provider].name}</p></div><div><p className="text-[#9aa1b7]">Health-check timestamp</p><p className="mt-1 font-bold text-[#414a76]">{deploymentResult?.healthCheckedAt ? new Date(deploymentResult.healthCheckedAt).toLocaleString() : 'Not available'}</p></div></div>
+        <div className="mt-6 flex flex-col gap-3 sm:flex-row"><Button onClick={() => { if (liveUrl) { setOpened(true); window.open(liveUrl, '_blank', 'noopener,noreferrer'); } }} disabled={!liveUrl} className="flex-1" data-testid="button-open-live"><ExternalLink size={16} /> {opened ? 'Opening live project' : liveUrl ? 'Open live project' : 'Live URL is not available yet.'}</Button><Button variant="secondary" onClick={() => setLogsOpen(!logsOpen)} className="flex-1" data-testid="button-view-logs"><FileText size={16} /> {logsOpen ? 'Hide deployment logs' : 'View deployment logs'}</Button></div>
+        {logsOpen && <div className="mt-5 overflow-hidden rounded-xl bg-[#20254a] p-4 font-mono text-[11px] leading-6 text-[#c4caf1]" data-testid="panel-deployment-logs">{(deploymentResult?.logs ?? []).map((log) => <p key={`${log.timestamp}-${log.message}`}><span className="text-[#72d2c7]">{log.timestamp.includes('T') ? new Date(log.timestamp).toLocaleTimeString() : log.timestamp}</span> {log.message}</p>)}</div>}
+      </div>
+        <div className="mt-6 flex flex-col items-center justify-center gap-3 text-xs text-[#9299b2] sm:flex-row sm:gap-6"><span className="flex items-center gap-1.5"><ShieldCheck size={14} className="text-[#3d9e95]" /> SSL active</span><span className="flex items-center gap-1.5"><Server size={14} className="text-[#5965df]" /> Hosted on {deploymentResult?.provider ?? PROVIDERS[provider].name}</span><Link href="/" className="font-bold text-[#5965df] hover:text-[#3e49b8]" data-testid="link-deploy-another">Deploy another project <ArrowRight size={13} className="inline" /></Link></div>
+      <Link href="/" className="mx-auto mt-6 flex min-h-11 w-full max-w-xs items-center justify-center gap-2 rounded-xl border border-[#d9ddf1] bg-white px-4 text-sm font-semibold text-[#252b59] transition hover:border-[#aeb6ea] hover:bg-[#f8f8ff]" data-testid="button-deploy-another"><Rocket size={16} /> Deploy another project</Link>
     </div>
   </PageShell>;
 }
@@ -423,9 +503,16 @@ function MobileBottomNav() {
 function AppRouter() {
   const [, setLocation] = useLocation();
   const [project, setProject] = useState<Project>(SAMPLE_PROJECT);
-  const [provider, setProvider] = useState<ProviderId>('vercel');
+  const [provider, setProvider] = useState<ProviderId | null>(null);
+  const [demoMode, setDemoMode] = useState(true);
+  const [deploymentResult, setDeploymentResult] = useState<DeploymentResult | null>(null);
+  const [deploymentError, setDeploymentError] = useState<DeploymentError | null>(null);
 
-  const chooseSource = (source: SourceKind, fileName = 'launchpad-web', meta?: SourceMeta, destination = '/upload') => {
+  const chooseSource = (source: SourceKind, fileName = 'launchpad-web', meta?: SourceMeta, destination = '/upload', isDemo = false) => {
+    setProvider(null);
+    setDemoMode(isDemo);
+    setDeploymentResult(null);
+    setDeploymentError(null);
     setProject({
       ...SAMPLE_PROJECT,
       source,
@@ -433,6 +520,12 @@ function AppRouter() {
       ...meta,
     });
     setLocation(destination);
+  };
+  const approveDeployment = (name: string) => {
+    setProject((current) => ({ ...current, name }));
+    setDeploymentResult(null);
+    setDeploymentError(null);
+    setLocation('/deploying');
   };
 
   return <RoutedErrorBoundary>
@@ -442,9 +535,9 @@ function AppRouter() {
       <Route path="/upload" component={() => <UploadProject project={project} setLocation={setLocation} />} />
       <Route path="/analysis" component={() => <Analysis project={project} setLocation={setLocation} />} />
       <Route path="/providers" component={() => <Providers provider={provider} setProvider={setProvider} setLocation={setLocation} />} />
-      <Route path="/approve" component={() => <Approve project={project} provider={provider} setProject={setProject} setLocation={setLocation} />} />
-      <Route path="/deploying" component={() => <Deploying project={project} provider={provider} setLocation={setLocation} />} />
-      <Route path="/success" component={() => <Success project={project} provider={provider} />} />
+      <Route path="/approve" component={() => provider ? <Approve project={project} provider={provider} demoMode={demoMode} onApprove={approveDeployment} setLocation={setLocation} /> : <Providers provider={provider} setProvider={setProvider} setLocation={setLocation} />} />
+      <Route path="/deploying" component={() => provider ? <Deploying project={project} provider={provider} demoMode={demoMode} deploymentError={deploymentError} setLocation={setLocation} setDeploymentResult={setDeploymentResult} setDeploymentError={setDeploymentError} /> : <Providers provider={provider} setProvider={setProvider} setLocation={setLocation} />} />
+      <Route path="/success" component={() => provider ? <Success project={project} provider={provider} demoMode={demoMode} deploymentResult={deploymentResult} /> : <Providers provider={provider} setProvider={setProvider} setLocation={setLocation} />} />
       <Route component={NotFound} />
     </Switch>
     <MobileBottomNav />
