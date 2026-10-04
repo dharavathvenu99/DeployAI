@@ -1,5 +1,10 @@
 # See https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files for more about ignoring files.
 
+# Environment files
+.env
+.env.*
+!.env.example
+
 # compiled output
 dist
 tmp
@@ -9,7 +14,7 @@ out-tsc
 .expo-shared
 
 # dependencies
-node_modules
+node_modules/
 
 # IDEs and editors
 /.idea
@@ -47,3 +52,23 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+env/
+
+# SQLite databases (local dev only)
+*.db
+*.sqlite
+*.sqlite3
+
+# Backend uploads (user-uploaded files, not source code)
+backend/uploads/
+
+# Test artifacts / logs
+*.log
