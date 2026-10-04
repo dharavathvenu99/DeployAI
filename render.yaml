@@ -14,7 +14,11 @@ services:
       - key: PORT
         value: 8001
       - key: DEMO_MODE
-        value: "true"
+        value: "false"
+      - key: FRONTEND_URL
+        value: https://deployai-2.onrender.com
+      - key: BACKEND_URL
+        value: https://deployai-1-zx6q.onrender.com
       - key: DATABASE_URL
         fromDatabase:
           name: deployai-db
@@ -31,6 +35,18 @@ services:
         sync: false
       - key: RAILWAY_API_KEY
         sync: false
+
+# Frontend Static Site
+# NOTE: if the frontend (https://deployai-2.onrender.com) was created manually,
+# set VITE_API_URL=https://deployai-1-zx6q.onrender.com in its Environment
+# settings and trigger a manual redeploy. The blueprint below is for fresh setups.
+staticSites:
+  - name: deployai-frontend
+    buildCommand: "cd frontend && npm install && npm run build"
+    staticPublishPath: ./frontend/dist
+    envVars:
+      - key: VITE_API_URL
+        value: https://deployai-1-zx6q.onrender.com
 
 databases:
   - name: deployai-db

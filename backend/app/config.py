@@ -22,8 +22,26 @@ class Settings(BaseModel):
     SAMPLES_DIR: str = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "sample_projects")
     
     # Frontend URL for CORS (comma-separated list)
-    FRONTEND_URL: str = os.getenv("FRONTEND_URL", "")
-    
+    FRONTEND_URL: str = os.getenv("FRONTEND_URL", "https://deployai-2.onrender.com")
+    # Backend public URL — used to build real executable live URLs (/live/<id>)
+    BACKEND_URL: str = os.getenv("BACKEND_URL", os.getenv("RENDER_EXTERNAL_URL", "https://deployai-1-zx6q.onrender.com"))
+    # Directory where built live sites are published (served at /live/<deployment_id>/)
+    LIVE_DIR: str = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "uploads", "live")
+
+    PRODUCTION_FRONTENDS: tuple = (
+        "https://deployai-2.onrender.com",
+    )
+    PRODUCTION_BACKENDS: tuple = (
+        "https://deployai-1-zx6q.onrender.com",
+    )
+
+    @property
+    def LIVE_BASE_URL(self) -> str:
+        base = (self.BACKEND_URL or "").strip().rstrip("/")
+        if base:
+            return base
+        return "https://deployai-1-zx6q.onrender.com"
+
     @property
     def ALLOWED_ORIGINS(self) -> list[str]:
         origins = [
@@ -32,18 +50,21 @@ class Settings(BaseModel):
             "http://127.0.0.1:5173",
             "http://127.0.0.1:8001",
         ]
-        # Add production frontend URL if configured
+        # Always allow the production frontend/backend so Render deploys work
+        # even when FRONTEND_URL env var is missing on the platform.
+        for url in list(self.PRODUCTION_FRONTENDS) + list(self.PRODUCTION_BACKENDS):
+            origins.append(url)
+        # Add configured frontend URL(s) if provided
         if self.FRONTEND_URL:
             for url in self.FRONTEND_URL.split(","):
-                url = url.strip()
+                url = url.strip().rstrip("/")
                 if url:
                     origins.append(url)
-        # Allow all in demo mode for development flexibility
-        # Note: In demo mode, we don't use credentials, so "*" is acceptable
-        if self.DEMO_MODE:
-            origins.append("*")
+        # Also allow backend URL explicitly
+        if self.BACKEND_URL:
+            origins.append(self.BACKEND_URL.strip().rstrip("/"))
         # Deduplicate while preserving order
-        return list(dict.fromkeys(origins))
+        return list(dict.fromkeys(o for o in origins if o))
     
     @property
     def CORS_ALLOW_CREDENTIALS(self) -> bool:
@@ -53,3 +74,4 @@ class Settings(BaseModel):
 settings = Settings()
 os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
 os.makedirs(settings.SAMPLES_DIR, exist_ok=True)
+os.makedirs(settings.LIVE_DIR, exist_ok=True)

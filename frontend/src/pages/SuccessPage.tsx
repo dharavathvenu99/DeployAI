@@ -112,15 +112,20 @@ export const SuccessPage: React.FC<SuccessPageProps> = ({
           <span>Deployed Successfully</span>
         </div>
         <h2 className="text-2xl sm:text-4xl font-display font-extrabold text-text-primary">
-          Your App is Live on Edge CDN!
+          Your App is Live!
         </h2>
         <p className="text-xs sm:text-sm text-text-secondary">
           Provisioned on <span className="text-primary font-semibold uppercase">{deployment.provider}</span> with automated SSL certificate.
         </p>
-        {deployment.is_demo && (
+        {deployment.is_demo ? (
           <p className="text-xs text-warning mt-1 flex items-center justify-center gap-1">
             <Activity className="w-3 h-3 animate-pulse" />
-            Demo mode: deployment simulated
+            Legacy demo deployment (simulated) — redeploy to get a real live URL
+          </p>
+        ) : (
+          <p className="text-xs text-success mt-1 flex items-center justify-center gap-1">
+            <CheckCircle2 className="w-3 h-3" />
+            Real live deployment — open the URL to run your project
           </p>
         )}
       </div>

@@ -8,13 +8,14 @@ export default defineConfig(({ mode }) => {
   
   // Get API URL from environment variable
   // In development: uses Vite proxy to localhost:8001
-  // In production: MUST be set via platform environment variables (Vercel/Netlify/Railway)
+  // In production (Render): set VITE_API_URL=https://deployai-1-zx6q.onrender.com
+  // in the Static Site's Environment settings (plus frontend/.env.production).
   const apiUrl = process.env.VITE_API_URL || 'http://127.0.0.1:8001';
 
-  // In production, VITE_API_URL MUST be set via platform environment variables
-  // We don't provide a fallback in production to avoid silent failures
-  const viteApiUrl = isProduction 
-    ? (process.env.VITE_API_URL || '') 
+  // In production, fall back to the known Render backend instead of an
+  // empty string (empty string previously crashed the app at startup).
+  const viteApiUrl = isProduction
+    ? (process.env.VITE_API_URL || 'https://deployai-1-zx6q.onrender.com')
     : apiUrl;
 
   return {

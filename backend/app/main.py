@@ -89,6 +89,37 @@ def health():
     }
 
 
+# Serve REAL deployed projects at /live/<deployment_id>/ (DeployAI Cloud).
+# Each successful DeployAI Cloud deployment publishes its built static output to
+# uploads/live/<deployment_id>/ — these URLs are public and execute in a browser.
+LIVE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "uploads", "live")
+os.makedirs(LIVE_DIR, exist_ok=True)
+
+
+@app.get("/live/{deployment_id}", include_in_schema=False)
+def serve_live_root(deployment_id: str):
+    index = os.path.join(LIVE_DIR, deployment_id, "index.html")
+    if os.path.exists(index):
+        return FileResponse(index)
+    return {"error": "Live deployment not found", "deployment_id": deployment_id}
+
+
+@app.get("/live/{deployment_id}/{file_path:path}", include_in_schema=False)
+def serve_live_files(deployment_id: str, file_path: str):
+    base = os.path.join(LIVE_DIR, deployment_id)
+    target = os.path.normpath(os.path.join(base, file_path))
+    # Block path traversal outside the deployment slot
+    if os.path.commonpath([base, target]) != base:
+        return {"error": "Invalid path"}
+    if os.path.isfile(target):
+        return FileResponse(target)
+    # SPA fallback so client-side routes execute instead of 404
+    index = os.path.join(base, "index.html")
+    if os.path.exists(index):
+        return FileResponse(index)
+    return {"error": "Live deployment not found", "deployment_id": deployment_id}
+
+
 # Check if frontend production build exists
 FRONTEND_DIST = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "frontend", "dist")
 

@@ -6,7 +6,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app \
     PORT=8001 \
-    DEMO_MODE=true
+    DEMO_MODE=false \
+    FRONTEND_URL=https://deployai-2.onrender.com \
+    BACKEND_URL=https://deployai-1-zx6q.onrender.com
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \

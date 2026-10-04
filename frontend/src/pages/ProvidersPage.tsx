@@ -76,8 +76,8 @@ export const ProvidersPage: React.FC<ProvidersPageProps> = ({
           Select Deployment Provider
         </h2>
         <p className="text-xs sm:text-sm text-text-secondary max-w-xl mx-auto">
-          Choose a provider for <span className="text-primary font-semibold">{framework}</span>. 
-          Netlify deploys real projects; Vercel is a simulated prototype; Render is coming soon.
+          Choose a provider for <span className="text-primary font-semibold">{framework}</span>.
+          DeployAI Cloud gives an instant real live URL — Netlify / Vercel / Render deploy for real when their tokens are configured.
         </p>
       </header>
 
@@ -304,7 +304,7 @@ export const ProvidersPage: React.FC<ProvidersPageProps> = ({
           <AlertCircle className="w-5 h-5 text-warning shrink-0" />
           <div>
             <span className="text-xs font-bold text-warning block">Select a provider to continue</span>
-            <p className="text-[11px] text-text-secondary mt-0.5">Click on Netlify or Vercel (Prototype) to select a deployment target. Render is coming soon.</p>
+            <p className="text-[11px] text-text-secondary mt-0.5">DeployAI Cloud works instantly with no setup. Netlify / Vercel / Render give real external URLs when their tokens are configured.</p>
           </div>
         </article>
       )}

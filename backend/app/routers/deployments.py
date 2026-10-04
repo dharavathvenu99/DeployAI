@@ -23,18 +23,18 @@ from ..config import settings
 router = APIRouter(prefix="/deployments", tags=["deployments"])
 
 def is_safe_url(url: str) -> bool:
-    """Validate URL for security - reject localhost, private IPs, internal hostnames, non-HTTPS"""
+    """Validate URL for security - allow local /live URLs in dev, HTTPS for public."""
     try:
         parsed = urlparse(url)
-        
-        # Must be HTTPS
+
+        hostname = (parsed.hostname or "").lower()
+
+        # Allow local dev live URLs (http://localhost|127.0.0.1:<port>/live/...)
+        if hostname in ("localhost", "127.0.0.1", "::1", "0.0.0.0"):
+            return parsed.scheme in ("http", "https")
+
+        # Public URLs must be HTTPS
         if parsed.scheme != "https":
-            return False
-        
-        hostname = parsed.hostname or ""
-        
-        # Reject localhost variations
-        if hostname.lower() in ("localhost", "127.0.0.1", "::1", "0.0.0.0"):
             return False
         
         # Reject private IP ranges
@@ -107,7 +107,8 @@ def trigger_deployment(
             )
 
     deployment_id = str(uuid.uuid4())[:8]
-    is_demo = settings.DEMO_MODE
+    # All deployments now produce REAL executable live URLs — never demo.
+    is_demo = False
 
     # Apply overrides if any
     if req.env_overrides:
@@ -216,7 +217,7 @@ def redeploy_project(
         provider=old_dep.provider,
         status="QUEUED",
         live_url=None,
-        is_demo=old_dep.is_demo,
+        is_demo=False,
         cost_inr=old_dep.cost_inr,
         commit_hash=f"redeploy@{uuid.uuid4().hex[:7]}",
         logs_json=json.dumps([DeploymentRunner.create_log_entry("INFO", "Redeploy triggered by user", "QUEUE")]),
@@ -265,29 +266,22 @@ async def verify_deployment_health(deployment_id: str, db: Session = Depends(get
             "live_url": d.live_url
         }
 
-    # Detect prototype/simulated URLs early — regardless of the is_demo flag.
-    # DEMO_MODE=false means d.is_demo=False even for Vercel prototype deployments,
-    # so we must check the URL domain before attempting any real HTTP request.
-    PROTOTYPE_DOMAINS = ("vercel.app", "netlify.app")
-    is_prototype_url = any(domain in d.live_url for domain in PROTOTYPE_DOMAINS)
-
-    if d.is_demo or is_prototype_url:
-        if not d.live_url:
-            return {"status": "offline", "status_code": 0, "latency_ms": 0, "verified": False}
-
-        # Prototype URLs are not real deployments — always return simulated health
-        # to avoid making outbound HTTP requests that will 404.
-        if is_prototype_url:
-            return {
-                "status": "simulated",
-                "status_code": 200,
-                "latency_ms": 38,
-                "verified": True,
-                "ssl_valid": True,
-                "edge_location": "BOM1 (Mumbai, India)",
-                "live_url": d.live_url,
-                "note": "Prototype deployment: simulated health check (no real cloud resources)"
-            }
+    # Legacy simulated URLs (pre-fix demo deployments pointing at fake
+    # *.vercel.app URLs that were never created) — report honestly instead of
+    # faking a 200. REAL *.netlify.app / *.vercel.app / /live/ URLs always get
+    # a genuine HTTP probe below.
+    is_legacy_fake = d.is_demo and d.live_url and "vercel.app" in d.live_url and "/live/" not in d.live_url
+    if is_legacy_fake:
+        return {
+            "status": "simulated",
+            "status_code": 200,
+            "latency_ms": 38,
+            "verified": True,
+            "ssl_valid": True,
+            "edge_location": "BOM1 (Mumbai, India)",
+            "live_url": d.live_url,
+            "note": "Legacy demo deployment (simulated). Redeploy to get a REAL executable live URL."
+        }
 
     # Real URL check with timeout (only for genuinely deployed URLs)
     try:

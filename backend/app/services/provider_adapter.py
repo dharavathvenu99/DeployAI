@@ -106,36 +106,40 @@ class NetlifyProvider(ProviderAdapter):
             return response.json()
     
     async def _upload_deploy_files(self, site_id: str, deploy_dir: str) -> Dict[str, Any]:
-        """Upload build artifacts to Netlify using their deploy API"""
+        """Upload build artifacts to Netlify using their deploy API (raw zip body)."""
         # Create a zip file of the deploy directory
         zip_path = os.path.join(tempfile.gettempdir(), f"deploy_{site_id}.zip")
-        
+
         with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
             for root, dirs, files in os.walk(deploy_dir):
                 for file in files:
                     file_path = os.path.join(root, file)
                     arcname = os.path.relpath(file_path, deploy_dir)
                     zf.write(file_path, arcname)
-        
-        # Upload using Netlify's deploy API (multipart/form-data)
+
+        # Upload using Netlify's deploy API.
+        # Netlify expects the raw zip bytes with Content-Type: application/zip
+        # (multipart/form-data uploads are rejected).
         url = f"https://api.netlify.com/api/v1/sites/{site_id}/deploys"
         headers = {
             "Authorization": f"Bearer {settings.NETLIFY_AUTH_TOKEN}",
+            "Content-Type": "application/zip",
         }
-        
+
         with open(zip_path, 'rb') as f:
-            files = {'file': (f'deploy_{site_id}.zip', f, 'application/zip')}
-            async with httpx.AsyncClient(timeout=120.0) as client:
-                response = await client.post(url, headers=headers, files=files)
-                response.raise_for_status()
-        
+            zip_bytes = f.read()
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            response = await client.post(url, headers=headers, content=zip_bytes)
+            response.raise_for_status()
+            data = response.json()
+
         # Cleanup
         try:
             os.remove(zip_path)
-        except:
+        except Exception:
             pass
-        
-        return response.json()
+
+        return data
     
     async def create_site(self, project_name: str, framework: str) -> DeploymentResult:
         try:
@@ -143,10 +147,10 @@ class NetlifyProvider(ProviderAdapter):
             site_name = project_name.lower().replace(" ", "-").replace("_", "-")[:50]
             clean_name = "".join(c for c in site_name if c.isalnum() or c == "-")
             unique_name = f"{clean_name}-{uuid.uuid4().hex[:6]}"
-            
+
+            # NOTE: do not send custom_domain=None — Netlify rejects explicit null.
             result = await self._make_request("POST", "/sites", json={
                 "name": unique_name,
-                "custom_domain": None
             })
             
             site_id = result.get("id")
@@ -327,127 +331,375 @@ class NetlifyProvider(ProviderAdapter):
             return False
 
 
-class VercelProvider(ProviderAdapter):
-    """Vercel provider - simulated prototype (clearly labeled)"""
-    
+def _resolve_deploy_dir(project_dir: str, output_dir: str) -> Optional[str]:
+    """Find the directory holding the built static files (must contain index.html)."""
+    candidates: List[str] = []
+    if output_dir:
+        candidates.append(os.path.join(project_dir, output_dir))
+    for fallback in ["dist", "build", "out", "public", "."]:
+        p = os.path.join(project_dir, fallback) if fallback != "." else project_dir
+        if p not in candidates:
+            candidates.append(p)
+    for candidate in candidates:
+        if os.path.isdir(candidate) and os.path.exists(os.path.join(candidate, "index.html")):
+            return candidate
+    # Last resort: any dir with an index.html (1 level deep search)
+    if os.path.isdir(project_dir):
+        for entry in os.listdir(project_dir):
+            p = os.path.join(project_dir, entry)
+            if os.path.isdir(p) and os.path.exists(os.path.join(p, "index.html")):
+                return p
+    return None
+
+
+class DeployAIProvider(ProviderAdapter):
+    """DeployAI Cloud — REAL self-hosted live hosting on this backend.
+
+    Builds the project for real (the deployer runs the build first), publishes
+    the static output to uploads/live/<site_id>/ and serves it at
+    {BACKEND_URL}/live/<site_id}/. The URL is real, public and executes in a
+    browser the moment the deployment succeeds — no third-party token needed.
+    """
+
     @property
     def name(self) -> str:
-        return "Vercel (Prototype)"
-    
+        return "DeployAI Cloud"
+
     @property
     def is_available(self) -> bool:
-        return True  # Always available as prototype
-    
+        return True  # Always available — hosted by this backend
+
     @property
     def is_prototype(self) -> bool:
-        return True
-    
+        return False
+
+    def _live_url(self, site_id: str) -> str:
+        return f"{settings.LIVE_BASE_URL.rstrip('/')}/live/{site_id}/"
+
     async def create_site(self, project_name: str, framework: str) -> DeploymentResult:
-        # Simulated site creation
-        site_name = project_name.lower().replace(" ", "-").replace("_", "-")[:50]
-        clean_name = "".join(c for c in site_name if c.isalnum() or c == "-")
-        unique_name = f"{clean_name}-{uuid.uuid4().hex[:6]}"
-        demo_url = f"https://{unique_name}.vercel.app"
-        
-        await asyncio.sleep(0.5)  # Simulate API call
-        
-        return DeploymentResult(
-            success=True,
-            deployment_id=f"vercel-{uuid.uuid4().hex[:8]}",
-            live_url=demo_url,
-            logs=[f"[PROTOTYPE] Created Vercel project: {unique_name}", f"[PROTOTYPE] Simulated deployment URL: {demo_url}"]
-        )
-    
-    async def deploy_project(self, site_id: str, project_dir: str, build_command: str, output_dir: str, env_vars: Dict[str, str] = None) -> DeploymentResult:
-        await asyncio.sleep(1.0)  # Simulate deployment
-        
+        site_id = uuid.uuid4().hex[:8]
+        target = os.path.join(settings.LIVE_DIR, site_id)
+        os.makedirs(target, exist_ok=True)
         return DeploymentResult(
             success=True,
             deployment_id=site_id,
-            logs=[f"[PROTOTYPE] Build command: {build_command}", "[PROTOTYPE] Build completed", "[PROTOTYPE] Files uploaded to Vercel Edge Network"]
+            live_url=self._live_url(site_id),
+            logs=[f"Provisioned DeployAI Cloud live slot: {site_id}",
+                   f"Live URL reserved: {self._live_url(site_id)}"],
         )
-    
+
+    async def deploy_project(self, site_id: str, project_dir: str, build_command: str, output_dir: str, env_vars: Dict[str, str] = None) -> DeploymentResult:
+        try:
+            deploy_dir = _resolve_deploy_dir(project_dir, output_dir)
+            if not deploy_dir:
+                listing = os.listdir(project_dir) if os.path.isdir(project_dir) else []
+                return DeploymentResult(
+                    success=False,
+                    error=f"Build output not found (looked for index.html in '{output_dir}', dist/, build/, public/). Build may have failed.",
+                    logs=[f"Project dir contents: {listing}"],
+                )
+            target = os.path.join(settings.LIVE_DIR, site_id)
+            os.makedirs(settings.LIVE_DIR, exist_ok=True)
+            if os.path.exists(target):
+                shutil.rmtree(target, ignore_errors=True)
+            shutil.copytree(deploy_dir, target)
+            # SPA fallback so client-side routes execute instead of 404
+            index = os.path.join(target, "index.html")
+            count = sum(len(files) for _, _, files in os.walk(target))
+            return DeploymentResult(
+                success=True,
+                deployment_id=site_id,
+                live_url=self._live_url(site_id),
+                logs=[f"Published {count} files from {os.path.relpath(deploy_dir, project_dir)}",
+                      f"index.html present: {os.path.exists(index)}",
+                      "SPA fallback enabled (/live/<id>/* → index.html)"],
+            )
+        except Exception as e:
+            return DeploymentResult(success=False, error=f"DeployAI Cloud publish failed: {e}", logs=[str(e)])
+
     async def get_deployment_status(self, deployment_id: str) -> DeploymentResult:
-        await asyncio.sleep(0.3)
+        target = os.path.join(settings.LIVE_DIR, deployment_id)
+        ready = os.path.exists(os.path.join(target, "index.html"))
         return DeploymentResult(
-            success=True,
+            success=ready,
+            live_url=self._live_url(deployment_id) if ready else None,
             deployment_id=deployment_id,
-            logs=["[PROTOTYPE] Deployment ready"]
+            logs=["Live slot ready" if ready else "Live slot not published yet"],
         )
-    
+
     async def get_live_url(self, site_id: str) -> Optional[str]:
-        # Return a simulated Vercel URL
-        return f"https://{site_id.replace('vercel-', '')}.vercel.app"
-    
+        return self._live_url(site_id)
+
     async def run_health_check(self, url: str) -> DeploymentResult:
         if not url:
             return DeploymentResult(success=False, error="No URL provided", logs=["No URL to check"])
-        
-        await asyncio.sleep(0.5)
-        return DeploymentResult(
-            success=True,
-            live_url=url,
-            logs=[f"[PROTOTYPE] Health check passed for {url}", "[PROTOTYPE] Simulated HTTP 200 OK, latency: 42ms"]
-        )
+        try:
+            async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+                resp = await client.get(url)
+                ok = resp.status_code < 400
+                return DeploymentResult(
+                    success=ok,
+                    live_url=url,
+                    logs=[f"Health check: HTTP {resp.status_code}",
+                          f"Latency: {resp.elapsed.total_seconds()*1000:.0f}ms"],
+                    error=None if ok else f"Live URL returned HTTP {resp.status_code}",
+                )
+        except Exception as e:
+            return DeploymentResult(success=False, error=f"Health check failed: {e}", logs=[str(e)])
 
 
-class RenderProvider(ProviderAdapter):
-    """Render provider - disabled, coming soon"""
-    
+class VercelProvider(ProviderAdapter):
+    """Vercel provider — REAL API integration (falls back with a clear error)."""
+
     @property
     def name(self) -> str:
-        return "Render (Coming Soon)"
-    
+        return "Vercel"
+
     @property
     def is_available(self) -> bool:
-        return False
-    
+        token = settings.VERCEL_TOKEN or ""
+        return bool(token and token not in ("your_vercel_token_here", "change-me"))
+
     @property
     def is_prototype(self) -> bool:
         return False
-    
+
+    def _headers(self) -> Dict[str, str]:
+        return {"Authorization": f"Bearer {settings.VERCEL_TOKEN}", "Content-Type": "application/json"}
+
     async def create_site(self, project_name: str, framework: str) -> DeploymentResult:
+        if not self.is_available:
+            return DeploymentResult(success=False, error="Vercel token not configured (VERCEL_TOKEN).", logs=["Add VERCEL_TOKEN on the backend to enable real Vercel deploys."])
+        try:
+            site_name = project_name.lower().replace(" ", "-").replace("_", "-")[:50]
+            clean_name = "".join(c for c in site_name if c.isalnum() or c == "-").strip("-") or "app"
+            unique_name = f"{clean_name}-{uuid.uuid4().hex[:6]}"
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(
+                    "https://api.vercel.com/v9/projects",
+                    headers=self._headers(),
+                    json={"name": unique_name, "framework": None},
+                )
+                resp.raise_for_status()
+                data = resp.json()
+            project_id = data.get("id")
+            return DeploymentResult(
+                success=True, deployment_id=project_id or unique_name,
+                live_url=None,
+                logs=[f"Created Vercel project: {unique_name}", f"Project ID: {project_id}"],
+            )
+        except Exception as e:
+            return DeploymentResult(success=False, error=f"Failed to create Vercel project: {e}", logs=[str(e)])
+
+    def _collect_files(self, deploy_dir: str, limit_files: int = 200, max_bytes: int = 8 * 1024 * 1024) -> List[Dict[str, Any]]:
+        import base64
+        collected: List[Dict[str, Any]] = []
+        total = 0
+        for root, dirs, files in os.walk(deploy_dir):
+            dirs[:] = [d for d in dirs if d not in ("node_modules", ".git")]
+            for fn in files:
+                fp = os.path.join(root, fn)
+                rel = os.path.relpath(fp, deploy_dir).replace(os.sep, "/")
+                try:
+                    size = os.path.getsize(fp)
+                except OSError:
+                    continue
+                if size > 2 * 1024 * 1024 or total + size > max_bytes or len(collected) >= limit_files:
+                    continue
+                with open(fp, "rb") as f:
+                    raw = f.read()
+                collected.append({"file": rel, "data": base64.b64encode(raw).decode(), "encoding": "base64"})
+                total += size
+        # SPA fallback
+        if not any(f["file"] == "vercel.json" for f in collected):
+            import json as _json
+            cfg = _json.dumps({"routes": [{"src": "/(.*)", "dest": "/index.html"}]}).encode()
+            import base64 as _b64
+            collected.append({"file": "vercel.json", "data": _b64.b64encode(cfg).decode(), "encoding": "base64"})
+        return collected
+
+    async def deploy_project(self, site_id: str, project_dir: str, build_command: str, output_dir: str, env_vars: Dict[str, str] = None) -> DeploymentResult:
+        if not self.is_available:
+            return DeploymentResult(success=False, error="Vercel token not configured.", logs=[])
+        try:
+            deploy_dir = _resolve_deploy_dir(project_dir, output_dir) or project_dir
+            files = self._collect_files(deploy_dir)
+            if not files:
+                return DeploymentResult(success=False, error="No files to deploy.", logs=[])
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                resp = await client.post(
+                    f"https://api.vercel.com/v13/deployments?skipAutoDetection=true",
+                    headers=self._headers(),
+                    json={"name": site_id, "project": site_id, "files": files,
+                          "projectSettings": {"framework": None, "outputDirectory": "."}},
+                )
+                resp.raise_for_status()
+                data = resp.json()
+            dep_id = data.get("id")
+            url = data.get("url")
+            live = f"https://{url}" if url else None
+            return DeploymentResult(success=True, deployment_id=dep_id, live_url=live,
+                                    logs=[f"Deployment created: {dep_id}", f"Uploaded {len(files)} files", f"URL: {live}"])
+        except Exception as e:
+            return DeploymentResult(success=False, error=f"Vercel deploy failed: {e}", logs=[str(e)])
+
+    async def get_deployment_status(self, deployment_id: str) -> DeploymentResult:
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.get(f"https://api.vercel.com/v13/deployments/{deployment_id}", headers=self._headers())
+                resp.raise_for_status()
+                data = resp.json()
+            state = (data.get("state") or data.get("status") or "unknown").upper()
+            ready = state == "READY"
+            url = data.get("url")
+            live = f"https://{url}" if url else None
+            return DeploymentResult(success=ready, live_url=live if ready else None,
+                                    deployment_id=deployment_id, logs=[f"Vercel state: {state}"])
+        except Exception as e:
+            return DeploymentResult(success=False, error=str(e), logs=[str(e)])
+
+    async def get_live_url(self, site_id: str) -> Optional[str]:
+        return None
+
+    async def run_health_check(self, url: str) -> DeploymentResult:
+        if not url:
+            return DeploymentResult(success=False, error="No URL provided", logs=["No URL to check"])
+        try:
+            async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+                resp = await client.get(url)
+                ok = resp.status_code < 400
+                return DeploymentResult(success=ok, live_url=url,
+                                        logs=[f"Health check: HTTP {resp.status_code}"],
+                                        error=None if ok else f"HTTP {resp.status_code}")
+        except Exception as e:
+            return DeploymentResult(success=False, error=f"Health check failed: {e}", logs=[str(e)])
+
+
+class RenderProvider(ProviderAdapter):
+    """Render provider — REAL API when a GitHub repo + RENDER_API_KEY exist.
+
+    Render only deploys from a git repository, not from a zip upload, so for
+    zip/sample projects the deployer automatically falls back to DeployAI Cloud
+    (which still yields a REAL executable live URL). When the project has a
+    github_url and RENDER_API_KEY is set, a real Render web/static service is
+    created via the Render REST API.
+    """
+
+    @property
+    def name(self) -> str:
+        return "Render"
+
+    @property
+    def is_available(self) -> bool:
+        key = settings.RENDER_API_KEY or ""
+        return bool(key and key not in ("your_railway_api_key_here", "change-me", "your_render_api_key_here"))
+
+    @property
+    def is_prototype(self) -> bool:
+        return False
+
+    def _headers(self) -> Dict[str, str]:
+        owner = os.getenv("RENDER_OWNER_ID", "")
+        headers = {"Authorization": f"Bearer {settings.RENDER_API_KEY}", "Content-Type": "application/json"}
+        if owner:
+            headers["owner-id"] = owner
+        return headers
+
+    async def create_site(self, project_name: str, framework: str) -> DeploymentResult:
+        # Without a repo we cannot call Render yet — signal the deployer to
+        # fall back to DeployAI Cloud instead of failing the deployment.
         return DeploymentResult(
             success=False,
-            error="Render provider is not yet available. Coming soon!",
-            logs=["Render integration is under development"]
+            error="RENDER_NEEDS_REPO: Render deploys from a GitHub repo. Connect a GitHub repo or use DeployAI Cloud / Netlify / Vercel for zip uploads.",
+            logs=["Render requires a GitHub repository URL; zip upload has no repo to link."],
         )
-    
+
+    async def create_service_from_repo(self, project_name: str, repo_url: str, framework: str,
+                                       build_command: str = "", start_command: str = "",
+                                       output_dir: str = "", env_vars: Dict[str, str] = None) -> DeploymentResult:
+        if not self.is_available:
+            return DeploymentResult(success=False, error="Render API key not configured (RENDER_API_KEY).", logs=[])
+        try:
+            fw = (framework or "").lower()
+            is_static = any(k in fw for k in ["react", "vite", "vue", "static", "angular", "html"])
+            slug = "".join(c for c in project_name.lower().replace(" ", "-") if c.isalnum() or c == "-")[:40] or "app"
+            name = f"{slug}-{uuid.uuid4().hex[:4]}"
+            if is_static:
+                payload = {"type": "static_site", "name": name, "repo": repo_url,
+                           "buildCommand": build_command or "npm run build",
+                           "publishPath": output_dir or "dist"}
+            else:
+                payload = {"type": "web_service", "name": name, "repo": repo_url,
+                           "branch": "main", "buildCommand": build_command or "",
+                           "startCommand": start_command or "",
+                           "plan": "free", "envVars": [{"key": k, "value": v} for k, v in (env_vars or {}).items()]}
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post("https://api.render.com/v1/services", headers=self._headers(), json=payload)
+                resp.raise_for_status()
+                data = resp.json()
+            svc = data.get("service", data)
+            svc_id = svc.get("id")
+            url = svc.get("serviceDetails", {}).get("url") if isinstance(svc.get("serviceDetails"), dict) else None
+            live = f"https://{url}" if url and not str(url).startswith("http") else url
+            return DeploymentResult(success=True, deployment_id=svc_id, live_url=live,
+                                    logs=[f"Created Render service: {name}", f"Service ID: {svc_id}"])
+        except Exception as e:
+            return DeploymentResult(success=False, error=f"Render service creation failed: {e}", logs=[str(e)])
+
     async def deploy_project(self, site_id: str, project_dir: str, build_command: str, output_dir: str, env_vars: Dict[str, str] = None) -> DeploymentResult:
         return DeploymentResult(
             success=False,
-            error="Render provider is not yet available. Coming soon!",
-            logs=["Render integration is under development"]
+            error="RENDER_NEEDS_REPO: Render deploys from a GitHub repo.",
+            logs=["Use a GitHub-connected project for Render, or DeployAI Cloud for instant live URLs."],
         )
-    
+
     async def get_deployment_status(self, deployment_id: str) -> DeploymentResult:
-        return DeploymentResult(
-            success=False,
-            error="Render provider is not yet available. Coming soon!",
-            logs=[]
-        )
-    
+        if not self.is_available:
+            return DeploymentResult(success=False, error="Render API key not configured.", logs=[])
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.get(f"https://api.render.com/v1/services/{deployment_id}", headers=self._headers())
+                resp.raise_for_status()
+                data = resp.json()
+            svc = data.get("service", data)
+            status = str(svc.get("suspended", "")).lower()
+            url = (svc.get("serviceDetails", {}) or {}).get("url") if isinstance(svc.get("serviceDetails"), dict) else None
+            live = f"https://{url}" if url and not str(url).startswith("http") else url
+            ready = "suspend" not in status
+            return DeploymentResult(success=ready, live_url=live if ready else None,
+                                    deployment_id=deployment_id, logs=[f"Render service: {svc.get('name')}"])
+        except Exception as e:
+            return DeploymentResult(success=False, error=str(e), logs=[str(e)])
+
     async def get_live_url(self, site_id: str) -> Optional[str]:
-        return None
-    
+        result = await self.get_deployment_status(site_id)
+        return result.live_url
+
     async def run_health_check(self, url: str) -> DeploymentResult:
-        return DeploymentResult(
-            success=False,
-            error="Render provider is not yet available. Coming soon!",
-            logs=[]
-        )
+        if not url:
+            return DeploymentResult(success=False, error="No URL provided", logs=["No URL to check"])
+        try:
+            async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+                resp = await client.get(url)
+                ok = resp.status_code < 400
+                return DeploymentResult(success=ok, live_url=url,
+                                        logs=[f"Health check: HTTP {resp.status_code}"],
+                                        error=None if ok else f"HTTP {resp.status_code}")
+        except Exception as e:
+            return DeploymentResult(success=False, error=f"Health check failed: {e}", logs=[str(e)])
 
 
 def get_provider(provider_id: str) -> ProviderAdapter:
     """Factory function to get provider instance"""
     providers = {
+        "deployai": DeployAIProvider(),
         "netlify": NetlifyProvider(),
         "vercel": VercelProvider(),
         "render": RenderProvider(),
     }
-    return providers.get(provider_id, NetlifyProvider())
+    return providers.get((provider_id or "").lower(), DeployAIProvider())
 
 
 def get_available_providers() -> List[ProviderAdapter]:
     """Get list of all provider instances"""
-    return [NetlifyProvider(), VercelProvider(), RenderProvider()]
+    return [DeployAIProvider(), NetlifyProvider(), VercelProvider(), RenderProvider()]

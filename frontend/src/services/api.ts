@@ -2,26 +2,32 @@ import { AnalysisData, ProviderOption, DeploymentData, SampleProject, ConfigStat
 
 // Get the API base URL from environment variables
 // In development, Vite proxy handles /api routes to localhost:8001
-// In production, VITE_API_URL must be set to the full backend URL (e.g., https://deployai-backend.onrender.com)
+// In production, VITE_API_URL must be set to the full backend URL.
+// Production backend: https://deployai-1-zx6q.onrender.com
+// Production frontend: https://deployai-2.onrender.com
+const PROD_BACKEND_FALLBACK = 'https://deployai-1-zx6q.onrender.com';
+
 const getApiBaseUrl = (): string => {
-  const envUrl = import.meta.env.VITE_API_URL;
-  
+  const envUrl = (import.meta.env.VITE_API_URL as string | undefined)?.trim();
+
   if (envUrl) {
     // Ensure the URL doesn't have trailing slash and includes /api
     const base = envUrl.replace(/\/$/, '');
-    return `${base}/api`;
+    return base.endsWith('/api') ? base : `${base}/api`;
   }
-  
+
   // Development fallback - uses Vite proxy configured in vite.config.ts
   if (!import.meta.env.PROD) {
     return '/api';
   }
-  
-  // Production without VITE_API_URL - this will cause API calls to fail
-  // Throw a clear error to help with debugging
-  const errorMsg = '[DeployAI] VITE_API_URL is not set in production! Please configure the backend URL in your deployment platform (Vercel/Netlify). API calls will fail.';
-  console.error(errorMsg);
-  throw new Error(errorMsg);
+
+  // Production without VITE_API_URL: fall back to the known Render backend
+  // instead of crashing the whole app (previous code threw here → white screen).
+  console.warn(
+    `[DeployAI] VITE_API_URL is not set at build time; falling back to ${PROD_BACKEND_FALLBACK}. ` +
+    `Set VITE_API_URL=${PROD_BACKEND_FALLBACK} in your Render Static Site env vars and redeploy.`
+  );
+  return `${PROD_BACKEND_FALLBACK}/api`;
 };
 
 const API_BASE = getApiBaseUrl();
